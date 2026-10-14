@@ -1,0 +1,10 @@
+*.o
+*.a
+*.so
+*.elf
+*.3dsx
+*.cia
+*.bak
+*.save
+*.before-*
+.DS_Store
