@@ -262,7 +262,6 @@ The standalone 3DS frontend includes a custom LBA-style save selector with:
 - Player-name entry
 - Copy save
 - Delete save
-- Original-style animated plasma selection
 
 ---
 
