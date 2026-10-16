@@ -216,9 +216,11 @@ void Input::enableKeyMap(const char *id) {
 	if (_currentKeyMap != mainKeyMapId) {
 		_circlePadX = _circlePadY = 0;
 	}
-	// Sync the direct START edge detector across modal keymap transitions so
-	// holding START while a menu closes cannot immediately reopen another menu.
-	_startWasDown = (hidKeysHeld() & KEY_START) != 0;
+	// Sync the direct START/SELECT edge detectors across modal keymap transitions so
+	// holding either button while a menu closes cannot immediately reopen it.
+	const u32 held = hidKeysHeld();
+	_startWasDown = (held & KEY_START) != 0;
+	_selectWasDown = (held & KEY_SELECT) != 0;
 #endif
 	debugC(1, TwinE::kDebugInput, "enable keymap %s", id);
 }
@@ -299,12 +301,21 @@ void Input::readKeys() {
 	    Common::JOYAXIS_MAX
 	);
 
-	// START belongs to LBA, not to ScummVM.
-	const bool startDown = (hidKeysHeld() & KEY_START) != 0;
-	if (_currentKeyMap == mainKeyMapId && startDown && !_startWasDown) {
-		_actionStates[TwinEActionType::OptionsMenu] = 1;
+	// Keep START/SELECT away from ScummVM's generic shortcuts. START opens the
+	// native LBA pause menu; SELECT opens the inventory directly.
+	const u32 held = hidKeysHeld();
+	const bool startDown = (held & KEY_START) != 0;
+	const bool selectDown = (held & KEY_SELECT) != 0;
+	if (_currentKeyMap == mainKeyMapId) {
+		if (startDown && !_startWasDown) {
+			_actionStates[TwinEActionType::OptionsMenu] = 1;
+		}
+		if (selectDown && !_selectWasDown) {
+			_actionStates[TwinEActionType::InventoryMenu] = 1;
+		}
 	}
 	_startWasDown = startDown;
+	_selectWasDown = selectDown;
 
 	pollLowerScreenTouch();
 #endif

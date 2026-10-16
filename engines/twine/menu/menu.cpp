@@ -653,11 +653,20 @@ int32 Menu::doGameMenu(MenuSettings *menuSettings) {
 					direction = 1;
 				}
 				if (direction != 0) {
-					int languageId = _engine->_cfgfile._languageId + direction;
-					if (languageId < 0) {
-						languageId = ARRAYSIZE(ListLanguage) - 1;
-					} else if (languageId >= (int)ARRAYSIZE(ListLanguage)) {
-						languageId = 0;
+					// Some historical language table entries have no text bank (Portuguese
+					// in LBA1 uses an empty id). Skip those entries while cycling so
+					// Italian -> Right wraps straight back to English, just like Voices.
+					int languageId = _engine->_cfgfile._languageId;
+					for (int tries = 0; tries < (int)ARRAYSIZE(ListLanguage); ++tries) {
+						languageId += direction;
+						if (languageId < 0) {
+							languageId = ARRAYSIZE(ListLanguage) - 1;
+						} else if (languageId >= (int)ARRAYSIZE(ListLanguage)) {
+							languageId = 0;
+						}
+						if (ListLanguage[languageId].id && ListLanguage[languageId].id[0] != '\0') {
+							break;
+						}
 					}
 
 					const int oldLanguageId = _engine->_cfgfile._languageId;
@@ -774,10 +783,9 @@ int32 Menu::doGameMenu(MenuSettings *menuSettings) {
 
 #ifdef __3DS__
 		if (renderOnLower) {
-			// Keep the pause/options menu visually separate from gameplay on the
-			// touch LCD. The gameplay frame remains untouched on the upper screen,
-			// while the native LBA buttons are rendered over a plain black lower
-			// background using the current scene palette.
+			// Keep the gameplay frame untouched on the upper LCD, but use the same
+			// classic ship artwork as the startup SAVE selector behind the in-game
+			// menu on the touch screen.
 			const bool animationDue = lowerMenuLastPresent == 0 || loopMillis - lowerMenuLastPresent >= 100;
 			if (buttonsNeedRedraw || animationDue) {
 				if (_lowerScreenBackup.w != _engine->_workVideoBuffer.w ||
@@ -788,14 +796,30 @@ int32 Menu::doGameMenu(MenuSettings *menuSettings) {
 					                          _engine->_workVideoBuffer.format);
 				}
 				_lowerScreenBackup.blitFrom(_engine->_workVideoBuffer);
-				_engine->_workVideoBuffer.fillRect(_engine->_workVideoBuffer.getBounds(), COLOR_BLACK);
-				_engine->_frontVideoBuffer.fillRect(_engine->_frontVideoBuffer.getBounds(), COLOR_BLACK);
+
+				byte gameplayPalette[256 * 3];
+				_engine->_frontVideoBuffer.getPalette(gameplayPalette, 0, 256);
+				if (_lowerScreenMenuBaseReady) {
+					_engine->_workVideoBuffer.blitFrom(_lowerScreenMenuNativeBase);
+					_engine->_frontVideoBuffer.blitFrom(_lowerScreenMenuNativeBase);
+					_engine->_workVideoBuffer.setPalette(_lowerScreenMenuPalette, 0, 256);
+					_engine->_frontVideoBuffer.setPalette(_lowerScreenMenuPalette, 0, 256);
+				} else {
+					// Defensive fallback for unusual direct-launch paths where the startup
+					// menu artwork was never cached.
+					_engine->_workVideoBuffer.fillRect(_engine->_workVideoBuffer.getBounds(), COLOR_BLACK);
+					_engine->_frontVideoBuffer.fillRect(_engine->_frontVideoBuffer.getBounds(), COLOR_BLACK);
+				}
+
 				menuSettings->setActiveButton(currentButton);
 				drawButtons(menuSettings, false);
 				drawButtons(menuSettings, true);
 				copyFrontBufferToLowerScreen();
+
 				_engine->_workVideoBuffer.blitFrom(_lowerScreenBackup);
 				_engine->_frontVideoBuffer.blitFrom(_lowerScreenBackup);
+				_engine->_workVideoBuffer.setPalette(gameplayPalette, 0, 256);
+				_engine->_frontVideoBuffer.setPalette(gameplayPalette, 0, 256);
 				buttonsNeedRedraw = false;
 				lowerMenuLastPresent = loopMillis;
 			}
@@ -1524,7 +1548,11 @@ void Menu::presentLowerScreenScratch() {
 	const Common::Rect scratchRect(0, 0, 320, 240);
 	const Graphics::PixelFormat overlayFormat = g_system->getOverlayFormat();
 	byte palette[256 * 3];
-	_engine->_frontVideoBuffer.getPalette(palette, 0, 256);
+	if (_upperPauseOverlayActive) {
+		memcpy(palette, _upperPausePalette, sizeof(palette));
+	} else {
+		_engine->_frontVideoBuffer.getPalette(palette, 0, 256);
+	}
 	for (int y = 0; y < 240; ++y) {
 		const byte *src = (const byte *)_engine->_frontVideoBuffer.getBasePtr(0, y);
 		uint32 *dst = (uint32 *)_lowerScreenSurface.getBasePtr(0, y);
@@ -1641,17 +1669,21 @@ void Menu::drawLowerLbaText(const char *text, int x, int y, int width, uint32 co
 		for (int dx = left; dx < right; ++dx) {
 			const int sx0 = dx * srcW / 320;
 			const int sx1 = MAX(sx0 + 1, (dx + 1) * srcW / 320);
-			bool ink = false;
-			for (int sy = sy0; sy < MIN(sy1, srcH) && !ink; ++sy) {
+			int inkPixels = 0;
+			int samplePixels = 0;
+			for (int sy = sy0; sy < MIN(sy1, srcH); ++sy) {
 				const byte *src = (const byte *)_engine->_frontVideoBuffer.getBasePtr(0, sy);
 				for (int sx = sx0; sx < MIN(sx1, srcW); ++sx) {
+					++samplePixels;
 					if (src[sx] != COLOR_BLACK) {
-						ink = true;
-						break;
+						++inkPixels;
 					}
 				}
 			}
-			if (ink) {
+			// The previous "any source pixel wins" downsample made every 1px
+			// edge expand into the 320x240 result. Requiring at least half of
+			// the source footprint keeps the original LBA font visibly thinner.
+			if (samplePixels > 0 && inkPixels * 2 >= samplePixels) {
 				dst[dx] = color;
 			}
 		}
@@ -1660,27 +1692,32 @@ void Menu::drawLowerLbaText(const char *text, int x, int y, int width, uint32 co
 	_engine->_frontVideoBuffer.blitFrom(_lowerScreenTextBackup);
 }
 
-void Menu::drawLowerLbaWrappedText(const char *text, int x, int y, int width, int maxLines, uint32 color) {
+int Menu::drawLowerLbaWrappedText(const char *text, int x, int y, int width, int maxLines, uint32 color, int firstLine) {
 	if (!text || !*text || maxLines <= 0 || width <= 0) {
-		return;
+		return 0;
 	}
 
 	_engine->_text->setFont(INTER_LEAVE, INTER_SPACE);
 	const int nativeWidth = MAX(1, width * _engine->_frontVideoBuffer.w / 320);
 	const char *p = text;
 	Common::String line;
-	int lineNo = 0;
+	int logicalLine = 0;
+	int drawnLines = 0;
 	const int lineHeight = 17;
 
-	while (*p && lineNo < maxLines) {
+	auto emitLine = [&](const Common::String &value) {
+		if (logicalLine >= firstLine && drawnLines < maxLines) {
+			drawLowerLbaText(value.c_str(), x, y + drawnLines * lineHeight, width, color, false);
+			++drawnLines;
+		}
+		++logicalLine;
+	};
+
+	while (*p) {
 		while (*p == ' ' || *p == '\r' || *p == '\n' || *p == '\t') {
 			if (*p == '\n' && !line.empty()) {
-				drawLowerLbaText(line.c_str(), x, y + lineNo * lineHeight, width, color, false);
+				emitLine(line);
 				line.clear();
-				++lineNo;
-				if (lineNo >= maxLines) {
-					return;
-				}
 			}
 			++p;
 		}
@@ -1695,20 +1732,17 @@ void Menu::drawLowerLbaWrappedText(const char *text, int x, int y, int width, in
 		const Common::String word(wordStart, p - wordStart);
 		const Common::String candidate = line.empty() ? word : line + " " + word;
 		if (!line.empty() && _engine->_text->sizeFont(candidate.c_str()) > nativeWidth) {
-			drawLowerLbaText(line.c_str(), x, y + lineNo * lineHeight, width, color, false);
-			++lineNo;
-			if (lineNo >= maxLines) {
-				return;
-			}
+			emitLine(line);
 			line = word;
 		} else {
 			line = candidate;
 		}
 	}
 
-	if (!line.empty() && lineNo < maxLines) {
-		drawLowerLbaText(line.c_str(), x, y + lineNo * lineHeight, width, color, false);
+	if (!line.empty()) {
+		emitLine(line);
 	}
+	return logicalLine;
 }
 
 void Menu::drawLowerScreenHud() {
@@ -1804,11 +1838,19 @@ void Menu::drawLowerScreenHud() {
 	_lowerScreenSurface.fillRect(Common::Rect(barLeft, 9, hpFill, 20), hpColor);
 	drawLowerScreenFrame(Common::Rect(barLeft, 9, barRight, 20), border);
 
-	const int maxMagic = MAX(1, _engine->_gameState->_magicLevelIdx * 20);
-	const int mpFill = barLeft + barWidth * CLIP<int>(_engine->_gameState->_magicPoint, 0, maxMagic) / maxMagic;
-	_lowerScreenSurface.fillRect(Common::Rect(barLeft, 31, barRight, 42), fmt.RGBToColor(44, 47, 64));
-	_lowerScreenSurface.fillRect(Common::Rect(barLeft, 31, mpFill, 42), mpColor);
-	drawLowerScreenFrame(Common::Rect(barLeft, 31, barRight, 42), border);
+	// Match the original upper-screen magic bar: its *capacity* grows by one
+	// quarter for each acquired magic level instead of always spanning the full
+	// HUD width. The fill itself is based on the original absolute 0..80 MP
+	// scale, exactly like drawMagicPointsBar() above.
+	const int magicLevel = CLIP<int>(_engine->_gameState->_magicLevelIdx, 0, 4);
+	if (magicLevel > 0) {
+		const int mpCapacityRight = barLeft + barWidth * magicLevel / 4;
+		const int mpFill = MIN(mpCapacityRight,
+		                       barLeft + barWidth * CLIP<int>(_engine->_gameState->_magicPoint, 0, 80) / 80);
+		_lowerScreenSurface.fillRect(Common::Rect(barLeft, 31, mpCapacityRight, 42), fmt.RGBToColor(44, 47, 64));
+		_lowerScreenSurface.fillRect(Common::Rect(barLeft, 31, mpFill, 42), mpColor);
+		drawLowerScreenFrame(Common::Rect(barLeft, 31, mpCapacityRight, 42), border);
+	}
 
 	// Compact fairy-tale status icons: coin, little key and (once obtained) fuel.
 	_lowerScreenSurface.fillRect(Common::Rect(198, 9, 208, 19), goldDark);
@@ -1899,6 +1941,64 @@ void Menu::drawLowerScreenHud() {
 	}
 
 	g_system->copyRectToOverlay(_lowerScreenSurface.getPixels(), _lowerScreenSurface.pitch, 0, 0, 320, 240);
+}
+
+void Menu::show3DSPauseOverlay() {
+	if (_upperPauseOverlayActive) {
+		return;
+	}
+
+	const Graphics::ManagedSurface &front = _engine->_frontVideoBuffer;
+	if (_upperPauseBackup.w != front.w || _upperPauseBackup.h != front.h ||
+	    _upperPauseBackup.format != front.format) {
+		_upperPauseBackup.free();
+		_upperPauseBackup.create(front.w, front.h, front.format);
+	}
+	_upperPauseBackup.blitFrom(front);
+	_engine->_frontVideoBuffer.getPalette(_upperPausePalette, 0, 256);
+
+	// Freeze the current scene on the upper LCD and darken it without touching
+	// the scene pixels themselves. This keeps the pause view readable and makes
+	// restoration exact even for scenes that use a non-standard palette.
+	byte darkPalette[256 * 3];
+	for (int i = 0; i < 256 * 3; ++i) {
+		darkPalette[i] = (byte)((uint32)_upperPausePalette[i] * 52U / 100U);
+	}
+	// Keep the game's white text genuinely white over the dimmed scene.
+	darkPalette[COLOR_WHITE * 3 + 0] = 255;
+	darkPalette[COLOR_WHITE * 3 + 1] = 255;
+	darkPalette[COLOR_WHITE * 3 + 2] = 255;
+	darkPalette[COLOR_BLACK * 3 + 0] = 0;
+	darkPalette[COLOR_BLACK * 3 + 1] = 0;
+	darkPalette[COLOR_BLACK * 3 + 2] = 0;
+	_engine->_frontVideoBuffer.setPalette(darkPalette, 0, 256);
+
+	const char *pauseText = "PAUSE";
+	_engine->_text->setFontCrossColor(COLOR_BLACK);
+	_engine->_text->setFontColor(COLOR_WHITE);
+	const int textWidth = _engine->_text->sizeFont(pauseText);
+	const int x = (_engine->width() - textWidth) / 2;
+	const int y = (_engine->height() - _engine->_text->lineHeight) / 2;
+	_engine->_text->drawText(x, y, pauseText);
+
+	_engine->_frontVideoBuffer.addDirtyRect(_engine->_frontVideoBuffer.getBounds());
+	_engine->_frontVideoBuffer.forceUpdate();
+	_upperPauseOverlayActive = true;
+}
+
+void Menu::hide3DSPauseOverlay() {
+	if (!_upperPauseOverlayActive) {
+		return;
+	}
+
+	if (_upperPauseBackup.w == _engine->_frontVideoBuffer.w &&
+	    _upperPauseBackup.h == _engine->_frontVideoBuffer.h) {
+		_engine->_frontVideoBuffer.blitFrom(_upperPauseBackup);
+	}
+	_engine->_frontVideoBuffer.setPalette(_upperPausePalette, 0, 256);
+	_engine->_frontVideoBuffer.addDirtyRect(_engine->_frontVideoBuffer.getBounds());
+	_engine->_frontVideoBuffer.forceUpdate();
+	_upperPauseOverlayActive = false;
 }
 
 void Menu::updateLowerScreenBehaviourPanel() {
@@ -2009,10 +2109,23 @@ void Menu::drawLowerScreenInventory() {
 	if (available) {
 		_engine->_text->getInventoryText((InventoryItems)_inventorySelectedItem, description, sizeof(description));
 	}
+	_lowerScreenInventoryDescriptionPageCount = 1;
 	if (description[0] != '\0') {
-		drawLowerLbaWrappedText(description, 9, 162, 302, 3, text);
+		const int firstLine = _lowerScreenInventoryDescriptionPage * 3;
+		const int totalLines = drawLowerLbaWrappedText(description, 9, 162, 302, 3, text, firstLine);
+		_lowerScreenInventoryDescriptionPageCount = MAX(1, (totalLines + 2) / 3);
+		if (_lowerScreenInventoryDescriptionPage >= _lowerScreenInventoryDescriptionPageCount) {
+			_lowerScreenInventoryDescriptionPage = 0;
+		}
 	}
-	drawLowerLbaText("TOUCH AGAIN: USE     B: BACK", 7, 217, 306, muted, true);
+	if (_lowerScreenInventoryDescriptionPageCount > 1) {
+		const Common::String hint = Common::String::format("TEXT %d/%d: TAP    A: USE    B: BACK",
+		                                                       _lowerScreenInventoryDescriptionPage + 1,
+		                                                       _lowerScreenInventoryDescriptionPageCount);
+		drawLowerLbaText(hint.c_str(), 7, 217, 306, muted, true);
+	} else {
+		drawLowerLbaText("TOUCH AGAIN: USE     B: BACK", 7, 217, 306, muted, true);
+	}
 	g_system->copyRectToOverlay(_lowerScreenSurface.getPixels(), _lowerScreenSurface.pitch, 0, 0, 320, 240);
 }
 
@@ -2046,6 +2159,8 @@ void Menu::inventory3DS() {
 
 	int lastTouchSelection = -1;
 	bool usedWithA = false;
+	_lowerScreenInventoryDescriptionPage = 0;
+	_lowerScreenInventoryDescriptionPageCount = 1;
 	_lowerScreenInventoryAngle = LBAAngles::ANGLE_45;
 	_lowerScreenInventoryRotateAt = g_system->getMillis();
 	drawLowerScreenInventory();
@@ -2069,21 +2184,29 @@ void Menu::inventory3DS() {
 		}
 
 		Common::Point tap;
-		if (_engine->_input->consumeLowerScreenTap(tap) &&
-		    tap.x >= 5 && tap.x < 313 && tap.y >= 4 && tap.y < 156) {
-			const int col = (tap.x - 5) / 44;
-			const int row = (tap.y - 4) / 38;
-			const int item = col * 4 + row;
-			const bool available = item >= 0 && item < NUM_INVENTORY_ITEMS &&
-			                       _engine->_gameState->hasItem((InventoryItems)item) &&
-			                       (!_engine->_gameState->inventoryDisabled() || item == InventoryItems::kiCloverLeaf);
-			if (available) {
-				if (_inventorySelectedItem == item && lastTouchSelection == item) {
-					_engine->_loopInventoryItem = item;
-					break;
+		if (_engine->_input->consumeLowerScreenTap(tap)) {
+			if (tap.x >= 5 && tap.x < 313 && tap.y >= 4 && tap.y < 156) {
+				const int col = (tap.x - 5) / 44;
+				const int row = (tap.y - 4) / 38;
+				const int item = col * 4 + row;
+				const bool available = item >= 0 && item < NUM_INVENTORY_ITEMS &&
+				                       _engine->_gameState->hasItem((InventoryItems)item) &&
+				                       (!_engine->_gameState->inventoryDisabled() || item == InventoryItems::kiCloverLeaf);
+				if (available) {
+					if (_inventorySelectedItem == item && lastTouchSelection == item) {
+						_engine->_loopInventoryItem = item;
+						break;
+					}
+					_inventorySelectedItem = item;
+					_lowerScreenInventoryDescriptionPage = 0;
+					lastTouchSelection = item;
+					drawLowerScreenInventory();
 				}
-				_inventorySelectedItem = item;
-				lastTouchSelection = item;
+			} else if (tap.x >= 4 && tap.x < 316 && tap.y >= 159 && tap.y < 237 &&
+			           _lowerScreenInventoryDescriptionPageCount > 1) {
+				_lowerScreenInventoryDescriptionPage =
+				    (_lowerScreenInventoryDescriptionPage + 1) % _lowerScreenInventoryDescriptionPageCount;
+				lastTouchSelection = -1;
 				drawLowerScreenInventory();
 			}
 		}
@@ -2103,6 +2226,7 @@ void Menu::inventory3DS() {
 			lastTouchSelection = -1;
 		}
 		if (previous != _inventorySelectedItem) {
+			_lowerScreenInventoryDescriptionPage = 0;
 			_lowerScreenInventoryAngle = LBAAngles::ANGLE_45;
 			_lowerScreenInventoryRotateAt = g_system->getMillis();
 			drawLowerScreenInventory();
@@ -2196,8 +2320,13 @@ void Menu::showLowerScreenKeyboard(const char *typedText, int selectedX, int sel
 	_engine->_text->drawText((_engine->width() - textWidth) / 2, 16, title);
 
 	const Common::Rect nameRect(45, 58, _engine->width() - 45, 104);
-	processPlasmaEffect(nameRect, COLOR_64);
+	// Match the original LBA name-entry field: live plasma underneath a shaded
+	// inner box. The focused keyboard key itself remains the original solid red.
+	processPlasmaEffect(nameRect, 32);
+	Common::Rect nameBox(nameRect);
+	nameBox.grow(-1);
 	drawRectBorders(nameRect);
+	_engine->_interface->shadeBox(nameBox, 3);
 
 	const char *name = typedText ? typedText : "";
 	textWidth = _engine->_text->sizeFont(name);
@@ -2216,11 +2345,11 @@ void Menu::showLowerScreenKeyboard(const char *typedText, int selectedX, int sel
 	const int rowStep = 56;
 
 	auto drawClassicKey = [&](const Common::Rect &rect, const char *label, bool selected) {
-		// Match the original keyboard: normal cells are a slightly darkened view
-		// of the menu artwork, while the focused key uses the animated LBA plasma.
+		// Match the original PC keyboard: normal cells are a slightly darkened
+		// view of the artwork and the focused key is a solid red selection.
 		_engine->blitWorkToFront(rect);
 		if (selected) {
-			processPlasmaEffect(rect, COLOR_64);
+			_engine->_interface->box(rect, COLOR_91);
 		} else {
 			_engine->_interface->shadeBox(rect, 4);
 		}
@@ -2319,7 +2448,11 @@ void Menu::showLowerScreenGameFrame(const char *hint) {
 		_lowerScreenSurface.create(320, 240, fmt);
 	}
 	byte palette[256 * 3];
-	_engine->_frontVideoBuffer.getPalette(palette, 0, 256);
+	if (_upperPauseOverlayActive) {
+		memcpy(palette, _upperPausePalette, sizeof(palette));
+	} else {
+		_engine->_frontVideoBuffer.getPalette(palette, 0, 256);
+	}
 	const int srcW = _engine->_frontVideoBuffer.w;
 	const int srcH = _engine->_frontVideoBuffer.h;
 	for (int y = 0; y < 240; ++y) {
@@ -2379,6 +2512,10 @@ void Menu::showLowerScreenHolomapFrame(const char *hint) {
 	// 1.5x relative to the old full-screen downscale, while treating near-black
 	// pixels as transparent so the globe floats naturally in space.
 	byte palette[256 * 3];
+	// Holomap installs its own palette after the upper PAUSE overlay has been
+	// created. Using _upperPausePalette here would apply the gameplay palette
+	// to the globe and corrupt its colours. The lower LCD should always use the
+	// Holomap's current, live palette.
 	_engine->_frontVideoBuffer.getPalette(palette, 0, 256);
 	const int srcW = _engine->_frontVideoBuffer.w;
 	const int srcH = _engine->_frontVideoBuffer.h;
@@ -2579,82 +2716,69 @@ void Menu::refresh3DSSaveSlotCache() {
 }
 
 void Menu::animateLowerScreenSaveSelector() {
-	if (_lowerScreenSaveAnimGenerated <= 0 || _lowerScreenSaveSelectedItem < 0) {
+	if (_lowerScreenSaveSelectedItem < 0 || _lowerScreenSaveStaticMode < 0) {
 		return;
 	}
 
-	// Generate the remaining plasma frames lazily while the user is idle. This
-	// spreads the expensive original LBA plasma renderer across several frames,
-	// so moving the cursor never waits for four frames to be built at once.
-	if (_lowerScreenSaveAnimGenerated < 4) {
-		MenuSettings profiles;
-		profiles.setButtonsBoxHeight(230);
-		for (int slot = 0; slot < 3; ++slot) {
-			profiles.addButton(_3DSSaveSlotNames[slot].c_str(), slot);
-		}
-
-		Common::String action1;
-		Common::String action2;
-		switch (_lowerScreenSaveStaticMode) {
-		case kSaveSelectorCopySource:
-			action1 = "SELECT SOURCE";
-			action2 = "CANCEL";
-			break;
-		case kSaveSelectorCopyTarget:
-			action1 = _lowerScreenSaveStaticSource >= 0 && _lowerScreenSaveStaticSource < 3
-			              ? Common::String::format("COPY %s TO...", _3DSSaveSlotNames[_lowerScreenSaveStaticSource].c_str())
-			              : Common::String("SELECT DESTINATION");
-			action2 = "CANCEL";
-			break;
-		case kSaveSelectorCopyConfirm:
-			action1 = _lowerScreenSaveStaticTarget >= 0 && _lowerScreenSaveStaticTarget < 3
-			              ? Common::String::format("COPY TO %s", _3DSSaveSlotNames[_lowerScreenSaveStaticTarget].c_str())
-			              : Common::String("COPY");
-			action2 = "CANCEL";
-			break;
-		case kSaveSelectorDeleteTarget:
-			action1 = "SELECT FILE TO DELETE";
-			action2 = "CANCEL";
-			break;
-		case kSaveSelectorDeleteConfirm:
-			action1 = _lowerScreenSaveStaticTarget >= 0 && _lowerScreenSaveStaticTarget < 3
-			              ? Common::String::format("DELETE %s", _3DSSaveSlotNames[_lowerScreenSaveStaticTarget].c_str())
-			              : Common::String("DELETE");
-			action2 = "CANCEL";
-			break;
-		case kSaveSelectorNormal:
-		default:
-			action1 = "COPY";
-			action2 = "DELETE";
-			break;
-		}
-		profiles.addButton(action1.c_str(), 3);
-		profiles.addButton(action2.c_str(), 4);
-		profiles.setActiveButton(_lowerScreenSaveSelectedItem);
-
-		_engine->_frontVideoBuffer.blitFrom(_lowerScreenSaveNativeStatic);
-		_engine->_frontVideoBuffer.setPalette(_lowerScreenMenuPalette, 0, 256);
-		drawButtons(&profiles, true);
-
-		const int frame = _lowerScreenSaveAnimGenerated;
-		const Graphics::PixelFormat overlayFmt = g_system->getOverlayFormat();
-		if (_lowerScreenSaveAnimFrames[frame].w != 320 || _lowerScreenSaveAnimFrames[frame].h != 240 ||
-		    _lowerScreenSaveAnimFrames[frame].format != overlayFmt) {
-			_lowerScreenSaveAnimFrames[frame].free();
-			_lowerScreenSaveAnimFrames[frame].create(320, 240, overlayFmt);
-		}
-		_lowerScreenSaveAnimFrames[frame].blitFrom(_lowerScreenSaveStaticSurface);
-		copyFrontBufferRectScaledToSurface(_engine, _lowerScreenSaveAnimFrames[frame], _lowerScreenSaveActiveRect);
-		++_lowerScreenSaveAnimGenerated;
-		restoreUpperScreenLogo();
+	// Render the selected button exactly like the original TwinE menu on every
+	// animation tick. Do not replay a short cache of plasma snapshots: that made
+	// the flame pattern visibly loop/stutter on the 3DS lower screen.
+	MenuSettings profiles;
+	profiles.setButtonsBoxHeight(230);
+	for (int slot = 0; slot < 3; ++slot) {
+		profiles.addButton(_3DSSaveSlotNames[slot].c_str(), slot);
 	}
 
-	_lowerScreenSaveAnimFrame = (_lowerScreenSaveAnimFrame + 1) % _lowerScreenSaveAnimGenerated;
-	_lowerScreenSurface.blitFrom(_lowerScreenSaveAnimFrames[_lowerScreenSaveAnimFrame]);
+	Common::String action1;
+	Common::String action2;
+	switch (_lowerScreenSaveStaticMode) {
+	case kSaveSelectorCopySource:
+		action1 = "SELECT SOURCE";
+		action2 = "CANCEL";
+		break;
+	case kSaveSelectorCopyTarget:
+		action1 = _lowerScreenSaveStaticSource >= 0 && _lowerScreenSaveStaticSource < 3
+		              ? Common::String::format("COPY %s TO...", _3DSSaveSlotNames[_lowerScreenSaveStaticSource].c_str())
+		              : Common::String("SELECT DESTINATION");
+		action2 = "CANCEL";
+		break;
+	case kSaveSelectorCopyConfirm:
+		action1 = _lowerScreenSaveStaticTarget >= 0 && _lowerScreenSaveStaticTarget < 3
+		              ? Common::String::format("COPY TO %s", _3DSSaveSlotNames[_lowerScreenSaveStaticTarget].c_str())
+		              : Common::String("COPY");
+		action2 = "CANCEL";
+		break;
+	case kSaveSelectorDeleteTarget:
+		action1 = "SELECT FILE TO DELETE";
+		action2 = "CANCEL";
+		break;
+	case kSaveSelectorDeleteConfirm:
+		action1 = _lowerScreenSaveStaticTarget >= 0 && _lowerScreenSaveStaticTarget < 3
+		              ? Common::String::format("DELETE %s", _3DSSaveSlotNames[_lowerScreenSaveStaticTarget].c_str())
+		              : Common::String("DELETE");
+		action2 = "CANCEL";
+		break;
+	case kSaveSelectorNormal:
+	default:
+		action1 = "COPY";
+		action2 = "DELETE";
+		break;
+	}
+	profiles.addButton(action1.c_str(), 3);
+	profiles.addButton(action2.c_str(), 4);
+	profiles.setActiveButton(_lowerScreenSaveSelectedItem);
+
+	_engine->_frontVideoBuffer.blitFrom(_lowerScreenSaveNativeStatic);
+	_engine->_frontVideoBuffer.setPalette(_lowerScreenMenuPalette, 0, 256);
+	drawButtons(&profiles, true);
+
+	_lowerScreenSurface.blitFrom(_lowerScreenSaveStaticSurface);
+	copyFrontBufferRectScaledToSurface(_engine, _lowerScreenSurface, _lowerScreenSaveActiveRect);
 	if (!g_system->isOverlayVisible()) {
 		g_system->showOverlay(true);
 	}
 	g_system->copyRectToOverlay(_lowerScreenSurface.getPixels(), _lowerScreenSurface.pitch, 0, 0, 320, 240);
+	restoreUpperScreenLogo();
 }
 
 static int lowerScreenMenuButtonAt(const MenuSettings *menuSettings, const Common::Point &tap, int sourceW, int sourceH) {
@@ -2906,6 +3030,9 @@ void Menu::showLowerScreenSaveSelector(int selectedItem, int mode, int sourceSlo
 }
 
 void Menu::beginLowerScreenLoading() {
+	// Keep the current lower-screen panel visible during ordinary scene changes.
+	// Callers that really need a black touch LCD (startup, save loading, island
+	// arrival) blank it explicitly before entering the synchronous load.
 	_lowerScreenLoadingActive = true;
 	_lowerScreenLoadingLastUpdate = 0;
 	_lowerScreenLoadingAngle = LBAAngles::ANGLE_0;
@@ -3130,8 +3257,8 @@ EngineState Menu::run3DSFrontEnd() {
 		if (redraw) {
 			showLowerScreenSaveSelector(selectedItem, selectorMode, copySourceSlot, targetSlot);
 			lastAnimationFrame = now;
-		} else if (now - lastAnimationFrame >= 100) {
-			// Cheap animation path: only cycle pre-rendered LBA plasma frames.
+		} else if (now - lastAnimationFrame >= 50) {
+			// Advance the original live LBA plasma at ~20 fps on the touch LCD.
 			animateLowerScreenSaveSelector();
 			lastAnimationFrame = now;
 		}

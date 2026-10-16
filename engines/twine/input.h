@@ -118,6 +118,7 @@ private:
 	Common::Point _lowerScreenTapPos;
 	bool _lowerScreenTouchWasDown = false;
 	bool _startWasDown = false;
+	bool _selectWasDown = false;
 	Common::Point _lowerScreenTouchPos;
 	bool _lowerScreenDragPending = false;
 	Common::Point _lowerScreenDragDelta;

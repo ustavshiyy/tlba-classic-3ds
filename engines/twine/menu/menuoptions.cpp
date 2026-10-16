@@ -321,11 +321,10 @@ bool MenuOptions::enterText(TextId textIdx, char *textTargetBuf, size_t bufSize)
 	_engine->_text->drawText(halfScreenWidth - (_engine->_text->sizeFont(buffer) / 2), 20, buffer);
 	_engine->copyBlockPhys(0, 0, _engine->width() - 1, 99);
 #else
-	// The name keyboard already owns the lower LCD. Keep the upper LCD as the
-	// clean LBA title image; drawing the original PC prompt into its CLUT8 buffer
-	// while another menu palette was active produced the horizontal colour band.
-	_engine->_screens->loadImage(_engine->_resources->lbaLogo());
-	_engine->saveFrontBuffer();
+	// The 3DS frontend already has the clean LBA title on the upper LCD. Do not
+	// reload or restore another framebuffer here: that produced a one-frame blank
+	// flash between NEW GAME and the name keyboard. The lower keyboard restores
+	// the cached logo after borrowing TwinE's native framebuffer for rendering.
 #endif
 
 	Common::fill(&_onScreenKeyboardDirty[0], &_onScreenKeyboardDirty[ARRAYSIZE(_onScreenKeyboardDirty)], 1);
@@ -539,7 +538,9 @@ bool MenuOptions::enterText(TextId textIdx, char *textTargetBuf, size_t bufSize)
 }
 
 bool MenuOptions::newGameMenu() {
+#ifndef __3DS__
 	_engine->restoreFrontBuffer();
+#endif
 	_saveGameName[0] = '\0';
 	if (!enterText(TextId::kEnterYourName, _saveGameName, sizeof(_saveGameName))) {
 		return false;

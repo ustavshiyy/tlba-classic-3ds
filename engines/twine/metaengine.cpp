@@ -311,18 +311,20 @@ Common::KeymapArray TwinEMetaEngine::initKeymaps(const char *target) const {
 		act = new Action("OPTIONSMENU", _("Options menu"));
 		act->setCustomEngineActionEvent(TwinEActionType::OptionsMenu);
 		act->addDefaultInputMapping("F6");
-#ifdef __3DS__
-		// SELECT (JOY_BACK in the 3DS backend) opens the same native options
-		// menu as START while gameplay is active. Inside UI keymaps it remains Back.
-		act->addDefaultInputMapping("JOY_BACK");
-#endif
+		// On 3DS START and SELECT are handled directly in Input::readKeys() so both
+		// open LBA's native pause menu without invoking ScummVM global shortcuts.
 		gameKeyMap->addAction(act);
 
 		act = new Action("CENTER", _("Center"));
 		act->setCustomEngineActionEvent(TwinEActionType::RecenterScreenOnTwinsen);
 		act->addDefaultInputMapping("RETURN");
 		act->addDefaultInputMapping("KP_ENTER");
+#ifdef __3DS__
+		// X exists on every 3DS model; do not depend on New 3DS-only ZR.
+		act->addDefaultInputMapping("JOY_X");
+#else
 		act->addDefaultInputMapping("JOY_RIGHT_STICK");
+#endif
 		gameKeyMap->addAction(act);
 
 		act = new Action("USESELECTEDOBJECT", _("Use selected object"));
@@ -398,7 +400,9 @@ Common::KeymapArray TwinEMetaEngine::initKeymaps(const char *target) const {
 		act->setCustomEngineActionEvent(TwinEActionType::InventoryMenu);
 		act->addDefaultInputMapping("LSHIFT");
 		act->addDefaultInputMapping("RSHIFT");
+#ifndef __3DS__
 		act->addDefaultInputMapping("JOY_X");
+#endif
 		act->addDefaultInputMapping("i");
 		gameKeyMap->addAction(act);
 

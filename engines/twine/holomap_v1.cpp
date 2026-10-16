@@ -450,7 +450,11 @@ void HolomapV1::holoTraj(int32 trajectoryIndex) {
 #ifdef __3DS__
 	_engine->_input->resetActionStates();
 	_engine->_input->clearLowerScreenTap();
-	_engine->_menu->showLowerScreenIdlePanel();
+	// The trajectory ends while Scene::changeCube() is still synchronously
+	// preparing the destination island. Do not expose the decorative idle
+	// Twinsun artwork here; keep the touch LCD black until the gameplay HUD is
+	// ready on the destination scene.
+	_engine->_menu->showLowerScreenBlack();
 #endif
 	_engine->_input->enableKeyMap(mainKeyMapId);
 	_engine->restoreTimer();

@@ -185,9 +185,11 @@ private:
 	Graphics::ManagedSurface _lowerScreenMenuNativeBase;
 	Graphics::ManagedSurface _lowerScreenSaveNativeStatic;
 	Graphics::ManagedSurface _lowerScreenSaveStaticSurface;
-	Graphics::ManagedSurface _lowerScreenSaveAnimFrames[4];
+	Graphics::ManagedSurface _lowerScreenSaveAnimFrames[8];
 	Graphics::ManagedSurface _upperScreenLogoNativeBase;
+	Graphics::ManagedSurface _upperPauseBackup;
 	byte _lowerScreenMenuPalette[256 * 3]{};
+	byte _upperPausePalette[256 * 3]{};
 	byte _upperScreenLogoPalette[256 * 3]{};
 	bool _lowerScreenMenuBaseReady = false;
 	bool _upperScreenLogoReady = false;
@@ -205,6 +207,8 @@ private:
 	uint32 _lowerScreenHudSignature = 0xFFFFFFFFU;
 	int32 _lowerScreenInventoryAngle = LBAAngles::ANGLE_45;
 	uint32 _lowerScreenInventoryRotateAt = 0;
+	int _lowerScreenInventoryDescriptionPage = 0;
+	int _lowerScreenInventoryDescriptionPageCount = 1;
 	bool _lowerScreenLoadingActive = false;
 	uint32 _lowerScreenLoadingLastUpdate = 0;
 	int32 _lowerScreenLoadingAngle = LBAAngles::ANGLE_0;
@@ -212,11 +216,12 @@ private:
 	bool _3DSStartGateShown = false;
 	bool _lowerScreenClassicMenuActive = false;
 	bool _lowerScreenFadeInPending = false;
+	bool _upperPauseOverlayActive = false;
 	void beginLowerScreenScratch();
 	void presentLowerScreenScratch();
 	void drawLowerScreenFrame(const Common::Rect &rect, uint32 color);
 	void drawLowerLbaText(const char *text, int x, int y, int width, uint32 color, bool centered = false);
-	void drawLowerLbaWrappedText(const char *text, int x, int y, int width, int maxLines, uint32 color);
+	int drawLowerLbaWrappedText(const char *text, int x, int y, int width, int maxLines, uint32 color, int firstLine = 0);
 	void drawLowerScreenHud();
 	void drawLowerScreenInventory();
 	void copyFrontBufferToLowerScreen();
@@ -334,6 +339,8 @@ public:
 			_lowerScreenLastUpdate = 0;
 		}
 	}
+	void show3DSPauseOverlay();
+	void hide3DSPauseOverlay();
 #endif
 
 	int32 newGameClassicMenu();

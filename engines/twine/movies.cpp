@@ -464,13 +464,22 @@ bool Movies::playMovie(const char *name) { // PlayAnimFla
 	if (n != Common::String::npos) {
 		fileNamePath.erase(n);
 	}
+#ifdef __3DS__
+	Common::String lowerMovieName = fileNamePath;
+	lowerMovieName.toLowercase();
+	const bool islandTravelMovie = lowerMovieName == "bateau" || lowerMovieName == "bateau2";
+#endif
 
 	if (_engine->_cfgfile.Movie == CONF_MOVIE_FLAGIF) {
 		playGIFMovie(fileNamePath.c_str());
 #ifdef __3DS__
 		_engine->_input->resetActionStates();
 		_engine->_input->clearLowerScreenTap();
-		_engine->_menu->showLowerScreenIdlePanel();
+		if (islandTravelMovie) {
+			_engine->_menu->showLowerScreenBlack();
+		} else {
+			_engine->_menu->showLowerScreenIdlePanel();
+		}
 		_engine->_screens->_flagFade = true;
 #endif
 		return true;
@@ -488,7 +497,11 @@ bool Movies::playMovie(const char *name) { // PlayAnimFla
 #ifdef __3DS__
 		_engine->_input->resetActionStates();
 		_engine->_input->clearLowerScreenTap();
-		_engine->_menu->showLowerScreenIdlePanel();
+		if (islandTravelMovie) {
+			_engine->_menu->showLowerScreenBlack();
+		} else {
+			_engine->_menu->showLowerScreenIdlePanel();
+		}
 		_engine->_screens->_flagFade = true;
 #endif
 		return true;
@@ -571,7 +584,11 @@ bool Movies::playMovie(const char *name) { // PlayAnimFla
 #ifdef __3DS__
 	_engine->_input->resetActionStates();
 	_engine->_input->clearLowerScreenTap();
-	_engine->_menu->showLowerScreenIdlePanel();
+	if (islandTravelMovie) {
+		_engine->_menu->showLowerScreenBlack();
+	} else {
+		_engine->_menu->showLowerScreenIdlePanel();
+	}
 	_engine->_screens->_flagFade = true;
 #endif
 	return finished;

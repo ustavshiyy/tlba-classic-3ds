@@ -1091,7 +1091,13 @@ void TwinEEngine::processBonusList() {
 void TwinEEngine::processInventoryItem(InventoryItems item) {
 	switch (item) {
 	case kiHolomap:
+#ifdef __3DS__
+		_menu->show3DSPauseOverlay();
+#endif
 		_holomap->holoMap();
+#ifdef __3DS__
+		_menu->hide3DSPauseOverlay();
+#endif
 #ifndef __3DS__
 		_screens->_flagFade = true;
 #endif
@@ -1169,7 +1175,13 @@ void TwinEEngine::processInventoryItem(InventoryItems item) {
 void TwinEEngine::processInventoryAction() {
 	saveTimer(false);
 	testRestoreModeSVGA(true);
+#ifdef __3DS__
+	_menu->show3DSPauseOverlay();
+#endif
 	_menu->inventory();
+#ifdef __3DS__
+	_menu->hide3DSPauseOverlay();
+#endif
 	if (_loopInventoryItem >= 0 && _loopInventoryItem < NUM_INVENTORY_ITEMS) {
 		processInventoryItem((InventoryItems)_loopInventoryItem);
 	}
@@ -1190,9 +1202,11 @@ void TwinEEngine::processOptionsMenu() {
 	_sound->pauseSamples();
 #ifdef __3DS__
 	_menu->set3DSClassicMenuOnLowerScreen(true);
+	_menu->show3DSPauseOverlay();
 #endif
 	_menu->inGameOptionsMenu();
 #ifdef __3DS__
+	_menu->hide3DSPauseOverlay();
 	_menu->set3DSClassicMenuOnLowerScreen(false);
 #endif
 	_scene->playSceneMusic();
@@ -1285,9 +1299,11 @@ bool TwinEEngine::runGameEngine() { // mainLoopInteration
 #ifdef __3DS__
 			hitch.modal = true;
 			_menu->set3DSClassicMenuOnLowerScreen(true);
+			_menu->show3DSPauseOverlay();
 #endif
 			const int giveUp = _menu->quitMenu();
 #ifdef __3DS__
+			_menu->hide3DSPauseOverlay();
 			_menu->set3DSClassicMenuOnLowerScreen(false);
 #endif
 			if (giveUp == kQuitEngine) {
@@ -1322,7 +1338,9 @@ bool TwinEEngine::runGameEngine() { // mainLoopInteration
 			saveTimer(false);
 			testRestoreModeSVGA(true);
 			_menu->set3DSClassicMenuOnLowerScreen(true);
+			_menu->show3DSPauseOverlay();
 			const int giveUp = _menu->quitMenu();
+			_menu->hide3DSPauseOverlay();
 			_menu->set3DSClassicMenuOnLowerScreen(false);
 			if (giveUp == kQuitEngine) {
 				return false;
@@ -1350,7 +1368,13 @@ bool TwinEEngine::runGameEngine() { // mainLoopInteration
 
 		// inventory menu
 		_loopInventoryItem = -1;
-		if (_input->isActionActive(TwinEActionType::InventoryMenu) && _scene->_sceneHero->_body != -1 && _scene->_sceneHero->_move == ControlMode::kManual) {
+#ifdef __3DS__
+		// SELECT is injected directly as a one-shot action, so consume it here.
+		const bool inventoryRequested = _input->toggleActionIfActive(TwinEActionType::InventoryMenu);
+#else
+		const bool inventoryRequested = _input->isActionActive(TwinEActionType::InventoryMenu);
+#endif
+		if (inventoryRequested && _scene->_sceneHero->_body != -1 && _scene->_sceneHero->_move == ControlMode::kManual) {
 #ifdef __3DS__
 			hitch.modal = true;
 #endif
@@ -1455,7 +1479,13 @@ bool TwinEEngine::runGameEngine() { // mainLoopInteration
 #endif
 			testRestoreModeSVGA(true);
 			saveTimer(false);
+#ifdef __3DS__
+			_menu->show3DSPauseOverlay();
+#endif
 			_holomap->holoMap();
+#ifdef __3DS__
+			_menu->hide3DSPauseOverlay();
+#endif
 			// unfreeze here - the redrawEngineActions is also doing a freeze
 			// see https://bugs.scummvm.org/ticket/14808
 			restoreTimer();
