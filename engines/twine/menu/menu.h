@@ -180,6 +180,7 @@ private:
 	Graphics::ManagedSurface _lowerScreenSurface;
 	Graphics::ManagedSurface _lowerScreenLoadingBase;
 	Graphics::ManagedSurface _lowerScreenFadeBase;
+	Graphics::ManagedSurface _lowerScreenPauseBackup;
 	// Cached frontend artwork. The save selector must never reload/decode the
 	// ship image every animation tick on the 3DS.
 	Graphics::ManagedSurface _lowerScreenMenuNativeBase;
@@ -217,6 +218,8 @@ private:
 	bool _lowerScreenClassicMenuActive = false;
 	bool _lowerScreenFadeInPending = false;
 	bool _upperPauseOverlayActive = false;
+	bool _lowerScreenPauseBackupValid = false;
+	bool _lowerScreenEndingSuppressed = false;
 	void beginLowerScreenScratch();
 	void presentLowerScreenScratch();
 	void drawLowerScreenFrame(const Common::Rect &rect, uint32 color);
@@ -333,6 +336,8 @@ public:
 	void endLowerScreenLoading();
 	void fadeLowerScreenToBlack();
 	void requestLowerScreenFadeIn() { _lowerScreenFadeInPending = true; }
+	void setLowerScreenEndingSuppressed(bool suppressed);
+	bool isLowerScreenEndingSuppressed() const { return _lowerScreenEndingSuppressed; }
 	void set3DSClassicMenuOnLowerScreen(bool active) {
 		_lowerScreenClassicMenuActive = active;
 		if (!active) {

@@ -488,6 +488,12 @@ Common::Error TwinEEngine::run() {
 	debug("(c) 1994 by Adeline Software International, All Rights Reserved.");
 
 	ConfMan.registerDefault("usehighres", false);
+#ifdef __3DS__
+	// LBA Classic 3DS presents itself as a standalone game. Keep ScummVM's
+	// achievement bookkeeping intact, but never flash the generic ScummVM
+	// "Achievement unlocked!" OSD over gameplay.
+	ConfMan.setBool("disable_achievement_unlocked_osd", true);
+#endif
 
 	const Common::String &gameTarget = ConfMan.getActiveDomainName();
 	AchMan.setActiveDomain(getMetaEngine()->getAchievementsInfo(gameTarget));
@@ -705,7 +711,14 @@ bool TwinEEngine::copySaveSlot(int sourceSlot, int targetSlot) {
 	return ok;
 }
 
-bool TwinEEngine::canSaveGameStateCurrently(Common::U32String *msg) { return _scene->isGameRunning() && _scene->_sceneHero->_genBody != BodyType::btNone; }
+bool TwinEEngine::canSaveGameStateCurrently(Common::U32String *msg) {
+#ifdef __3DS__
+	if (_menu && _menu->isLowerScreenEndingSuppressed()) {
+		return false;
+	}
+#endif
+	return _scene->isGameRunning() && _scene->_sceneHero->_genBody != BodyType::btNone;
+}
 
 Common::Error TwinEEngine::loadGameStream(Common::SeekableReadStream *stream) {
 	debug("load game stream");
@@ -725,6 +738,13 @@ Common::Error TwinEEngine::saveGameStream(Common::WriteStream *stream, bool isAu
 
 void TwinEEngine::autoSave() {
 #ifdef __3DS__
+	// Entering an ending scene triggers normal scene-change autosaving, and
+	// THE_END triggers another autosave after rewriting the hero/scene state.
+	// Neither is safe to reload. Preserve the last playable save before the
+	// final door instead of overwriting the selected 3DS profile.
+	if (_menu && _menu->isLowerScreenEndingSuppressed()) {
+		return;
+	}
 	// The standalone 3DS build treats slots 0..2 as persistent console profiles.
 	// Progress is saved automatically, but always back into the profile that the
 	// player selected at startup. Mark it as a normal save so ScummVM never
@@ -1292,8 +1312,15 @@ bool TwinEEngine::runGameEngine() { // mainLoopInteration
 			return true;
 		}
 	} else if (!_screens->_flagFade) {
+#ifdef __3DS__
+		// Once the last door has closed, this is a non-interactive ending.
+		// Do not open modal UIs or permit save/copy from a scripted cutscene.
+		const bool allowInGameMenus = !_menu->isLowerScreenEndingSuppressed();
+#else
+		const bool allowInGameMenus = true;
+#endif
 		// Process give up menu - Press ESC
-		if (_input->toggleAbortAction() && _scene->_sceneHero->_lifePoint > 0 && _scene->_sceneHero->_body != -1 && !_scene->_sceneHero->_flags.bIsInvisible) {
+		if (allowInGameMenus && _input->toggleAbortAction() && _scene->_sceneHero->_lifePoint > 0 && _scene->_sceneHero->_body != -1 && !_scene->_sceneHero->_flags.bIsInvisible) {
 			saveTimer(false);
 			testRestoreModeSVGA(true) ;
 #ifdef __3DS__
@@ -1329,7 +1356,7 @@ bool TwinEEngine::runGameEngine() { // mainLoopInteration
 #endif
 		}
 
-		if (_input->toggleActionIfActive(TwinEActionType::OptionsMenu)) {
+		if (allowInGameMenus && _input->toggleActionIfActive(TwinEActionType::OptionsMenu)) {
 #ifdef __3DS__
 			// START and SELECT should open the original give-up/pause menu, not jump
 			// straight into Settings. This is the menu that contains Continue and
@@ -1374,7 +1401,7 @@ bool TwinEEngine::runGameEngine() { // mainLoopInteration
 #else
 		const bool inventoryRequested = _input->isActionActive(TwinEActionType::InventoryMenu);
 #endif
-		if (inventoryRequested && _scene->_sceneHero->_body != -1 && _scene->_sceneHero->_move == ControlMode::kManual) {
+		if (allowInGameMenus && inventoryRequested && _scene->_sceneHero->_body != -1 && _scene->_sceneHero->_move == ControlMode::kManual) {
 #ifdef __3DS__
 			hitch.modal = true;
 #endif
@@ -1392,7 +1419,7 @@ bool TwinEEngine::runGameEngine() { // mainLoopInteration
 		}
 #ifdef __3DS__
 		Common::Point lowerScreenTap;
-		if (_input->consumeLowerScreenTap(lowerScreenTap) &&
+		if (_input->consumeLowerScreenTap(lowerScreenTap) && allowInGameMenus &&
 		    _scene->_sceneHero->_body != -1 && _scene->_sceneHero->_move == ControlMode::kManual) {
 			// The clover boxes on the main lower HUD are a direct-use control. Keep
 			// inventory behaviour unchanged: this is only the compact status strip.
@@ -1473,7 +1500,7 @@ bool TwinEEngine::runGameEngine() { // mainLoopInteration
 		}
 
 		// Draw holomap
-		if (_input->toggleActionIfActive(TwinEActionType::OpenHolomap) && _gameState->hasItem(InventoryItems::kiHolomap) && !_gameState->inventoryDisabled()) {
+		if (allowInGameMenus && _input->toggleActionIfActive(TwinEActionType::OpenHolomap) && _gameState->hasItem(InventoryItems::kiHolomap) && !_gameState->inventoryDisabled()) {
 #ifdef __3DS__
 			hitch.modal = true;
 #endif

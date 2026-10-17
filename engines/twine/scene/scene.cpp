@@ -557,6 +557,16 @@ void Scene::changeCube() {
 	}
 
 #ifdef __3DS__
+	// From the moment Twinsen and Zoe enter the last door, gameplay is over.
+	// Keep the touch LCD completely black through the Sendell/end/credits
+	// sequence instead of showing the normal gameplay HUD.
+	const bool suppressEndingLower = _engine->isLBA1() &&
+	    (_newCube == LBA1SceneId::Polar_Island_end_scene ||
+	     _newCube == LBA1SceneId::Citadel_Island_end_sequence_1 ||
+	     _newCube == LBA1SceneId::Citadel_Island_end_sequence_2 ||
+	     _newCube == LBA1SceneId::Credits_List_Sequence);
+	_engine->_menu->setLowerScreenEndingSuppressed(suppressEndingLower);
+
 	// Preserve the classic LBA transition on the upper LCD while the lower LCD
 	// shows the loading indicator during the synchronous resource work.
 	const bool show3DSLoading = !_engine->_menuOptions->flagCredits;

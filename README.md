@@ -2,7 +2,7 @@
 
 A Nintendo 3DS port of **Little Big Adventure / Relentless: Twinsen's Adventure**, built on top of the ScummVM **TwinE** engine and adapted specifically for the dual-screen 3DS interface.
 
-> **Current stable milestone: v0.1.0**
+> **Current stable milestone: v0.1.1**
 
 The goal is not just to make LBA run on a 3DS, but to make it feel like a native dual-screen version of the game: gameplay on the upper screen, useful game UI on the touch screen, 3DS-friendly controls, save profiles, inventory, Holomap and proper pause behaviour.
 
@@ -361,8 +361,14 @@ See [`COPYING`](COPYING) for details.
 
 ## Status
 
-### v0.1.0 Stable
+### v0.1.1 Stable
 
 First stable checkpoint of the standalone 3DS port.
 
 The current baseline includes the custom dual-screen HUD, touch interface, save/profile system, inventory, Holomap, 4:3 movies, pause overlay, 3DS controls and stable scene-transition behaviour working together as one release.
+
+### Compatibility status
+
+- ✅ Full game completed from start to finish on real New Nintendo 3DS hardware
+- ✅ Main story confirmed playable through the ending and credits
+- ⚠️ Original 3DS / 2DS performance and compatibility still need wider testing

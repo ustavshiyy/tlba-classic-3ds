@@ -475,11 +475,7 @@ bool Movies::playMovie(const char *name) { // PlayAnimFla
 #ifdef __3DS__
 		_engine->_input->resetActionStates();
 		_engine->_input->clearLowerScreenTap();
-		if (islandTravelMovie) {
-			_engine->_menu->showLowerScreenBlack();
-		} else {
-			_engine->_menu->showLowerScreenIdlePanel();
-		}
+		_engine->_menu->showLowerScreenBlack();
 		_engine->_screens->_flagFade = true;
 #endif
 		return true;
@@ -497,11 +493,7 @@ bool Movies::playMovie(const char *name) { // PlayAnimFla
 #ifdef __3DS__
 		_engine->_input->resetActionStates();
 		_engine->_input->clearLowerScreenTap();
-		if (islandTravelMovie) {
-			_engine->_menu->showLowerScreenBlack();
-		} else {
-			_engine->_menu->showLowerScreenIdlePanel();
-		}
+		_engine->_menu->showLowerScreenBlack();
 		_engine->_screens->_flagFade = true;
 #endif
 		return true;
@@ -584,11 +576,7 @@ bool Movies::playMovie(const char *name) { // PlayAnimFla
 #ifdef __3DS__
 	_engine->_input->resetActionStates();
 	_engine->_input->clearLowerScreenTap();
-	if (islandTravelMovie) {
-		_engine->_menu->showLowerScreenBlack();
-	} else {
-		_engine->_menu->showLowerScreenIdlePanel();
-	}
+	_engine->_menu->showLowerScreenBlack();
 	_engine->_screens->_flagFade = true;
 #endif
 	return finished;

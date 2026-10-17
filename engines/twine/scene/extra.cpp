@@ -150,6 +150,19 @@ void Extra::initFly(ExtraListStruct *extra, int32 xAngle, int32 yAngle, int32 x,
 int32 Extra::initSpecial(int32 x, int32 y, int32 z, ExtraSpecialType type) {
 	const int16 flag = EXTRA_SPECIAL_MASK + (int16)type;
 
+#ifdef __3DS__
+	// Hit stars are purely decorative. A shotgun burst can spawn enough of them
+	// to become surprisingly expensive on 3DS, so cap only this visual effect.
+	if (type == ExtraSpecialType::kHitStars) {
+		int activeHitStars = 0;
+		for (int32 i = 0; i < EXTRA_MAX_ENTRIES; ++i) {
+			if (_extraList[i].sprite == flag && ++activeHitStars >= 8) {
+				return -1;
+			}
+		}
+	}
+#endif
+
 	for (int32 i = 0; i < EXTRA_MAX_ENTRIES; i++) {
 		ExtraListStruct *extra = &_extraList[i];
 		if (extra->sprite != -1) {

@@ -636,6 +636,13 @@ bool MenuOptions::deleteSaveMenu() {
 }
 
 bool MenuOptions::saveGameMenu() {
+#ifdef __3DS__
+	// Saving from the ending would overwrite a resumable profile with cutscene
+	// state. This also protects callers other than the normal pause menu.
+	if (_engine->_menu->isLowerScreenEndingSuppressed()) {
+		return false;
+	}
+#endif
 	if (!_engine->_scene->isGameRunning()) {
 		return false;
 	}

@@ -1163,8 +1163,31 @@ EngineState Menu::run() {
 }
 
 int32 Menu::quitMenu() {
+#ifdef __3DS__
+	// The ending is scripted: there is no safely resumable in-game savepoint.
+	// Never expose the pause/save/quit menu after the final door.
+	if (_lowerScreenEndingSuppressed) {
+		return 0;
+	}
+#endif
 	_engine->saveFrontBuffer();
 	_engine->_sound->pauseSamples();
+#ifdef __3DS__
+	// Preserve the exact lower-screen frame before the pause menu. Scripted
+	// transport sequences may temporarily remove Twinsen's drawable body, so
+	// rebuilding the HUD after Continue can otherwise fall back to unrelated
+	// artwork or leave the pause menu behind.
+	_lowerScreenPauseBackupValid = false;
+	if (_lowerScreenSurface.w == 320 && _lowerScreenSurface.h == 240) {
+		if (_lowerScreenPauseBackup.w != 320 || _lowerScreenPauseBackup.h != 240 ||
+		    _lowerScreenPauseBackup.format != _lowerScreenSurface.format) {
+			_lowerScreenPauseBackup.free();
+			_lowerScreenPauseBackup.create(320, 240, _lowerScreenSurface.format);
+		}
+		_lowerScreenPauseBackup.blitFrom(_lowerScreenSurface);
+		_lowerScreenPauseBackupValid = true;
+	}
+#endif
 
 	MenuSettings *localMenu;
 	if (_engine->_cfgfile.UseAutoSaving) {
@@ -1188,6 +1211,16 @@ int32 Menu::quitMenu() {
 		switch (menuId) {
 		case (int32)TextId::kContinue:
 			_engine->_sound->resumeSamples();
+#ifdef __3DS__
+			if (_lowerScreenPauseBackupValid) {
+				_lowerScreenSurface.blitFrom(_lowerScreenPauseBackup);
+				if (!g_system->isOverlayVisible()) {
+					g_system->showOverlay(true);
+				}
+				g_system->copyRectToOverlay(_lowerScreenSurface.getPixels(), _lowerScreenSurface.pitch, 0, 0, 320, 240);
+				g_system->updateScreen();
+			}
+#endif
 			break;
 		case (int32)TextId::kGiveUp:
 #ifdef __3DS__
@@ -1199,6 +1232,16 @@ int32 Menu::quitMenu() {
 			return 1;
 		case (int32)TextId::kCreateSaveGame:
 			_engine->_menuOptions->saveGameMenu();
+#ifdef __3DS__
+			// saveGameMenu() leaves its lower-screen save selector visible. Normally
+			// the gameplay HUD redraws immediately afterwards, but the ending sequence
+			// intentionally suppresses all lower-screen HUD updates. Re-assert the
+			// blackout so saving/copying during the final scene cannot leave the save
+			// selector stuck on the touch screen after returning to gameplay.
+			if (_lowerScreenEndingSuppressed) {
+				showLowerScreenBlack();
+			}
+#endif
 			break;
 		case (int32)TextId::kOptions:
 			// Let the engine open the full in-game Options tree (volume, language,
@@ -1748,7 +1791,9 @@ int Menu::drawLowerLbaWrappedText(const char *text, int x, int y, int width, int
 void Menu::drawLowerScreenHud() {
 	ActorStruct *hero = _engine->_scene->_sceneHero;
 	if (!hero || hero->_body == -1 || !hero->_entityDataPtr) {
-		showLowerScreenIdlePanel();
+		// During scripted transport sequences Twinsen can temporarily have no
+		// drawable body. Keep the last valid HUD instead of replacing it with
+		// the decorative idle/Twinsun artwork.
 		return;
 	}
 
@@ -2001,7 +2046,21 @@ void Menu::hide3DSPauseOverlay() {
 	_upperPauseOverlayActive = false;
 }
 
+void Menu::setLowerScreenEndingSuppressed(bool suppressed) {
+	if (_lowerScreenEndingSuppressed == suppressed) {
+		return;
+	}
+	_lowerScreenEndingSuppressed = suppressed;
+	_lowerScreenLastUpdate = 0;
+	if (suppressed) {
+		showLowerScreenBlack();
+	}
+}
+
 void Menu::updateLowerScreenBehaviourPanel() {
+	if (_lowerScreenEndingSuppressed) {
+		return;
+	}
 	if (g_system->getOverlayWidth() != 320 || g_system->getOverlayHeight() != 240) {
 		return;
 	}
@@ -2037,14 +2096,23 @@ void Menu::updateLowerScreenBehaviourPanel() {
 	}
 
 	const bool overlayWasLost = !g_system->isOverlayVisible();
-	if (!overlayWasLost && !_lowerScreenFadeInPending && _lowerScreenLastUpdate != 0 && signature == _lowerScreenHudSignature) {
-		return;
+	const uint32 now = g_system->getMillis();
+	if (!overlayWasLost && !_lowerScreenFadeInPending && _lowerScreenLastUpdate != 0) {
+		if (signature == _lowerScreenHudSignature) {
+			return;
+		}
+		// Rapid damage (for example shotgun pellets) used to rebuild four 3D
+		// behaviour portraits for every hit. Cap HUD rebuilds at 10 Hz; the game
+		// state itself is unaffected and the bar catches up on the next refresh.
+		if (now - _lowerScreenLastUpdate < 100) {
+			return;
+		}
 	}
 	// ScummVM's GUI hides the overlay when it returns to the engine. If any
 	// external GUI/modal screen ever slips through, force our native lower HUD
 	// back immediately instead of leaving a duplicate of the upper framebuffer.
 	_lowerScreenHudSignature = signature;
-	_lowerScreenLastUpdate = g_system->getMillis();
+	_lowerScreenLastUpdate = now;
 	drawLowerScreenHud();
 	if (_lowerScreenFadeInPending) {
 		_lowerScreenFadeInPending = false;
@@ -2265,6 +2333,9 @@ void Menu::inventory3DS() {
 }
 
 void Menu::showLowerScreenDialoguePanel() {
+	if (_lowerScreenEndingSuppressed) {
+		return;
+	}
 	_lowerScreenLastUpdate = 0;
 	if (g_system->getOverlayWidth() != 320 || g_system->getOverlayHeight() != 240) {
 		return;
@@ -3421,6 +3492,9 @@ EngineState Menu::run3DSFrontEnd() {
 }
 
 void Menu::showLowerScreenIdlePanel() {
+	if (_lowerScreenEndingSuppressed) {
+		return;
+	}
 	_lowerScreenLastUpdate = 0;
 	if (g_system->getOverlayWidth() != 320 || g_system->getOverlayHeight() != 240) {
 		return;
