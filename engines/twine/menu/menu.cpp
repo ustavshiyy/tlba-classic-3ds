@@ -2096,8 +2096,11 @@ void Menu::updateLowerScreenBehaviourPanel() {
 	}
 
 	const bool overlayWasLost = !g_system->isOverlayVisible();
+	const int screenChangeId = g_system->getScreenChangeID();
+	const bool displayWasResumed = (_lowerScreenLastScreenChangeId != screenChangeId);
+	_lowerScreenLastScreenChangeId = screenChangeId;
 	const uint32 now = g_system->getMillis();
-	if (!overlayWasLost && !_lowerScreenFadeInPending && _lowerScreenLastUpdate != 0) {
+	if (!overlayWasLost && !displayWasResumed && !_lowerScreenFadeInPending && _lowerScreenLastUpdate != 0) {
 		if (signature == _lowerScreenHudSignature) {
 			return;
 		}
@@ -2108,9 +2111,9 @@ void Menu::updateLowerScreenBehaviourPanel() {
 			return;
 		}
 	}
-	// ScummVM's GUI hides the overlay when it returns to the engine. If any
-	// external GUI/modal screen ever slips through, force our native lower HUD
-	// back immediately instead of leaving a duplicate of the upper framebuffer.
+	// ScummVM's GUI can hide the overlay, while HOME/sleep resume can preserve
+	// the visible flag but invalidate the lower-screen GPU contents. Either case
+	// must force a real TwinE HUD redraw instead of trusting the cached overlay.
 	_lowerScreenHudSignature = signature;
 	_lowerScreenLastUpdate = now;
 	drawLowerScreenHud();

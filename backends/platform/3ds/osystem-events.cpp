@@ -231,6 +231,7 @@ static void aptHookFunc(APT_HookType hookType, void *param) {
 			osys->sleeping = false;
 			osys->updateBacklight();
 			osys->updateConfig();
+			osys->refreshDisplayAfterResume();
 			break;
 		case APTHOOK_ONEXIT:
 			// HOME -> X invalidates the audio worker stack before the normal backend

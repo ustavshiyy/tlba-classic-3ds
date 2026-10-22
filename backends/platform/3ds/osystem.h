@@ -171,6 +171,7 @@ public:
 	void showOverlay(bool inGUI);
 	void hideOverlay();
 	bool isOverlayVisible() const { return _overlayVisible; }
+	void refreshDisplayAfterResume();
 	Graphics::PixelFormat getOverlayFormat() const;
 	void clearOverlay();
 	void grabOverlay(Graphics::Surface &surface);

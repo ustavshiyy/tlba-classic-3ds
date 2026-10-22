@@ -62,6 +62,7 @@
 
 #include "graphics/cursorman.h"
 #include "graphics/fontman.h"
+#include "graphics/surface.h"
 #include "graphics/yuv_to_rgb.h"
 #ifdef USE_FREETYPE2
 #include "graphics/fonts/ttf.h"
@@ -415,7 +416,120 @@ static void setupKeymapper(OSystem &system) {
 }
 
 #ifdef __3DS__
-extern bool g_lbaClassic3DSForceLauncher;
+static const char *const kLBAClassic3DSGamePath = "sdmc:/3ds/lba-classic-3ds/game/";
+
+static void showLBAClassic3DSMissingDataScreen(OSystem &system) {
+	// Keep the standalone error path completely outside the ScummVM GUI.
+	// The overlay is rendered only on the lower screen in the 3DS both-screen
+	// mode, leaving the upper screen clean and black.
+	system.fillScreen(0);
+	system.showOverlay(false);
+
+	const int16 width = system.getOverlayWidth();
+	const int16 height = system.getOverlayHeight();
+	Graphics::Surface screen;
+	screen.create(width, height, system.getOverlayFormat());
+
+	const uint32 background = screen.format.RGBToColor(8, 18, 38);
+	const uint32 panel = screen.format.RGBToColor(18, 42, 74);
+	const uint32 white = screen.format.RGBToColor(245, 245, 238);
+	const uint32 cyan = screen.format.RGBToColor(92, 214, 226);
+	const uint32 yellow = screen.format.RGBToColor(255, 211, 76);
+
+	screen.fillRect(Common::Rect(width, height), background);
+	screen.fillRect(Common::Rect(8, 8, width - 8, height - 8), panel);
+	screen.frameRect(Common::Rect(8, 8, width - 8, height - 8), cyan);
+	screen.frameRect(Common::Rect(11, 11, width - 11, height - 11), cyan);
+
+	const Graphics::Font *bigFont = FontMan.getFontByUsage(Graphics::FontManager::kBigGUIFont);
+	const Graphics::Font *font = FontMan.getFontByUsage(Graphics::FontManager::kGUIFont);
+	if (bigFont && font) {
+		bigFont->drawString(&screen, "LBA CLASSIC 3DS", 0, 20, width, yellow, Graphics::kTextAlignCenter);
+		font->drawString(&screen, "GAME DATA NOT FOUND", 0, 53, width, white, Graphics::kTextAlignCenter);
+
+		font->drawString(&screen, "Copy your Steam or GOG Classic files to:", 0, 82, width, white, Graphics::kTextAlignCenter);
+		font->drawString(&screen, "SD:/3ds/lba-classic-3ds/game/", 0, 104, width, cyan, Graphics::kTextAlignCenter);
+		font->drawString(&screen, "TLBA1C.exe must be inside this folder.", 0, 129, width, white, Graphics::kTextAlignCenter);
+		font->drawString(&screen, "Supported: Steam / GOG Classic", 0, 153, width, yellow, Graphics::kTextAlignCenter);
+		font->drawString(&screen, "Press HOME, then close the software.", 0, 196, width, white, Graphics::kTextAlignCenter);
+	}
+
+	system.copyRectToOverlay(screen.getPixels(), screen.pitch, 0, 0, width, height);
+	system.updateScreen();
+	screen.free();
+
+	// The screen is static, so draw it once and then only pump events. In
+	// particular, do not keep touching GSP while the HOME menu is active: on a
+	// CIA launch, HOME -> X can begin tearing graphics down before this loop
+	// unwinds. Likewise, once EVENT_QUIT arrives, return without hideOverlay()
+	// or any other graphics call and let normal backend destruction clean up.
+	Common::Event event;
+	for (;;) {
+		while (system.getEventManager()->pollEvent(event)) {
+			if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER)
+				return;
+		}
+		system.delayMillis(20);
+	}
+}
+
+static bool setupLBAClassic3DSStandaloneTarget() {
+	// Reuse an existing TwinE/LBA target when possible so save filenames from
+	// v0.1.x stay unchanged. The standalone build always owns the game path.
+	const Common::ConfigManager::DomainMap &domains = ConfMan.getGameDomains();
+	Common::String target;
+
+	for (Common::ConfigManager::DomainMap::const_iterator it = domains.begin();
+	     it != domains.end(); ++it) {
+		const Common::ConfigManager::Domain &domain = it->_value;
+		if (!domain.contains("engineid") || !domain.contains("gameid") ||
+		    domain["engineid"] != "twine" || domain["gameid"] != "lba")
+			continue;
+
+		// Prefer the normal TwinE-generated target name because v0.1.x saves
+		// use it (lba-win.###), but retain any existing LBA target as fallback.
+		if (it->_key == "lba-win") {
+			target = it->_key;
+			break;
+		}
+		if (target.empty())
+			target = it->_key;
+	}
+
+	Common::FSNode gameDir{Common::Path(kLBAClassic3DSGamePath)};
+	Common::FSList files;
+	if (!gameDir.exists() || !gameDir.isDirectory() ||
+	    !gameDir.getChildren(files, Common::FSNode::kListAll)) {
+		warning("LBA Classic 3DS: game data directory not found: %s", kLBAClassic3DSGamePath);
+		return false;
+	}
+
+	if (!target.empty()) {
+		ConfMan.setPath("path", Common::Path(kLBAClassic3DSGamePath), target);
+		ConfMan.setActiveDomain(target);
+		ConfMan.flushToDisk();
+		return true;
+	}
+
+	// First standalone launch: detect the game directly in the fixed SD path
+	// and create the regular TwinE target automatically. This keeps ScummVM's
+	// detector responsible for validating the user's original game files.
+	DetectionResults detectionResults = EngineMan.detectGames(files);
+	DetectedGames candidates = detectionResults.listRecognizedGames();
+	for (const DetectedGame &candidate : candidates) {
+		if (candidate.engineId != "twine" || candidate.gameId != "lba")
+			continue;
+
+		const Common::String newTarget = EngineMan.createTargetForGame(candidate);
+		ConfMan.setPath("path", Common::Path(kLBAClassic3DSGamePath), newTarget);
+		ConfMan.setActiveDomain(newTarget);
+		ConfMan.flushToDisk();
+		return true;
+	}
+
+	warning("LBA Classic 3DS: no supported Little Big Adventure data found in %s", kLBAClassic3DSGamePath);
+	return false;
+}
 #endif
 
 extern "C" int scummvm_main(int argc, const char * const argv[]) {
@@ -609,9 +723,15 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 	setupGraphics(system);
 
 	if (!configLoadStatus) {
+#ifdef __3DS__
+		// Standalone LBA build must never expose the ScummVM GUI. Continue with
+		// defaults; the fixed LBA target will be rebuilt below if necessary.
+		warning("LBA Classic 3DS: invalid ScummVM config, continuing with defaults");
+#else
 		GUI::MessageDialog alert(_("Bad config file format. overwrite?"), _("Yes"), _("Cancel"));
 		if (alert.runModal() != GUI::kMessageOK)
    			return 0;
+#endif
 	}
 	// Init the different managers that are used by the engines.
 	// Do it here to prevent fragmentation later
@@ -756,30 +876,20 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 	}
 
 #ifdef __3DS__
-	// LBA Classic 3DS: when no target was supplied, automatically select the
-	// configured Little Big Adventure target. Target names are user-defined,
-	// so identify it by engineid/gameid rather than assuming it is named "lba".
-	if (nullptr == ConfMan.getActiveDomain() && !g_lbaClassic3DSForceLauncher) {
-		const Common::ConfigManager::DomainMap &domains = ConfMan.getGameDomains();
-
-		for (Common::ConfigManager::DomainMap::const_iterator it = domains.begin();
-		     it != domains.end(); ++it) {
-			const Common::ConfigManager::Domain &domain = it->_value;
-
-			if (domain.contains("engineid") &&
-			    domain.contains("gameid") &&
-			    domain["engineid"] == "twine" &&
-			    domain["gameid"] == "lba") {
-				ConfMan.setActiveDomain(it->_key);
-				break;
-			}
+	// Standalone mode: always use the dedicated LBA directory and never show
+	// the ScummVM launcher. A custom missing-data screen will be added next;
+	// for now a failed detection exits cleanly after logging the reason.
+	if (nullptr == ConfMan.getActiveDomain() && !ConfMan.hasKey("dump_all_dialogs")) {
+		if (!setupLBAClassic3DSStandaloneTarget()) {
+			showLBAClassic3DSMissingDataScreen(system);
+			return 0;
 		}
 	}
-#endif
-
+#else
 	// Unless a game was specified, show the launcher dialog
 	if (nullptr == ConfMan.getActiveDomain() && !ConfMan.hasKey("dump_all_dialogs"))
 		launcherDialog();
+#endif
 
 	// FIXME: We're now looping the launcher. This, of course, doesn't
 	// work as well as it should. In theory everything should be destroyed
@@ -888,8 +998,13 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 
 			// Did an error occur ?
 			if (result.getCode() != Common::kNoError && result.getCode() != Common::kUserCanceled) {
+#ifdef __3DS__
+				// Do not expose ScummVM dialogs in the standalone build.
+				warning("LBA Classic 3DS: error running game: %s", result.getDesc().c_str());
+#else
 				// Shows an informative error dialog if starting the selected game failed.
 				GUI::displayErrorDialog(result, _("Error running game:"));
+#endif
 			}
 
 			// Quit unless an error occurred, or Return to launcher was requested
@@ -938,7 +1053,11 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 		} else {
 			DebugMan.removeAllDebugChannels();
 
+#ifdef __3DS__
+			warning("LBA Classic 3DS: could not identify configured game: %s", result.getDesc().c_str());
+#else
 			GUI::displayErrorDialog(result, _("Error running game:"));
+#endif
 
 			// Clear the active domain
 			ConfMan.setActiveDomain("");
@@ -947,6 +1066,10 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 		// reset the graphics to default
 		setupGraphics(system);
 		if (nullptr == ConfMan.getActiveDomain()) {
+#ifdef __3DS__
+			// Standalone LBA build exits instead of returning to ScummVM.
+			break;
+#else
 #ifdef PS3_MULTI_MODULES
 			// For engine instance, process was called with <target-id> param
 			// Return to launcher flow spawn new launcher process without params
@@ -956,6 +1079,7 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 			}
 #endif
 			launcherDialog();
+#endif
 		}
 	}
 #ifdef USE_SDL_NET

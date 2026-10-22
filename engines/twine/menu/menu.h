@@ -206,6 +206,7 @@ private:
 	Common::Rect _lowerScreenSaveActiveRect;
 	uint32 _lowerScreenLastUpdate = 0;
 	uint32 _lowerScreenHudSignature = 0xFFFFFFFFU;
+	int _lowerScreenLastScreenChangeId = -1;
 	int32 _lowerScreenInventoryAngle = LBAAngles::ANGLE_45;
 	uint32 _lowerScreenInventoryRotateAt = 0;
 	int _lowerScreenInventoryDescriptionPage = 0;

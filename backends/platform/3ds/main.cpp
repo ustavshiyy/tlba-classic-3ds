@@ -35,7 +35,6 @@ u32 __stacksize__ = 64 * 1024;
 // Set the size of the linear heap to allow a larger application heap.
 // We do this in backends/platform/3ds/allocHeapsOverride.cpp
 
-bool g_lbaClassic3DSForceLauncher = false;
 
 int main(int argc, char *argv[]) {
 	// Initialize basic libctru stuff
@@ -65,11 +64,6 @@ int main(int argc, char *argv[]) {
 #ifdef DYNAMIC_MODULES
 	PluginManager::instance().addPluginProvider(new CTRPluginProvider());
 #endif
-
-	// Capture SELECT once at startup. The actual LBA target is selected later,
-	// after scummvm.ini has been loaded.
-	hidScanInput();
-	g_lbaClassic3DSForceLauncher = (hidKeysHeld() & KEY_SELECT) != 0;
 
 	int res = scummvm_main(argc, argv);
 

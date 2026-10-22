@@ -651,6 +651,18 @@ void OSystem_3DS::hideOverlay() {
 	updateSize();
 }
 
+void OSystem_3DS::refreshDisplayAfterResume() {
+	// Returning from the HOME Menu can invalidate GPU texture contents while
+	// the CPU-side surfaces remain intact. Re-upload the current game frame and
+	// lower-screen overlay on the next updateScreen() instead of waiting for a
+	// gameplay change to make them dirty again.
+	_gameTopTexture.markDirty();
+	if (_overlayVisible) {
+		_overlay.markDirty();
+	}
+	++_screenChangeId;
+}
+
 Graphics::PixelFormat OSystem_3DS::getOverlayFormat() const {
 	return _overlay.format;
 }

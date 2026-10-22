@@ -1,10 +1,14 @@
 TARGET := lba-classic-3ds
 
 APP_TITLE       := LBA Classic 3DS
-APP_DESCRIPTION := Little Big Adventure Classic port
-APP_AUTHOR      := ScummVM TwinE / community port
+APP_DESCRIPTION := Little Big Adventure Classic
+APP_AUTHOR      := ltlo
 APP_ICON        := $(srcdir)/backends/platform/3ds/app/icon.png
 
+# LBA Classic 3DS release version.
+# Nintendo 3DS title version uses 6 bits major, 6 bits minor, 4 bits micro:
+# 0.2.0 = (0 << 10) | (2 << 4) | 0 = 32.
+LBA_CIA_VERSION := 32
 APP_RSF         := $(srcdir)/backends/platform/3ds/app/scummvm.rsf
 APP_BANNER_IMAGE:= $(srcdir)/backends/platform/3ds/app/banner.png
 APP_BANNER_AUDIO:= $(srcdir)/backends/platform/3ds/app/banner.wav
@@ -60,7 +64,7 @@ $(TARGET).bnr: $(APP_BANNER_IMAGE) $(APP_BANNER_AUDIO)
 	@echo built ... $(notdir $@)
 
 $(TARGET).cia: $(EXECUTABLE) $(APP_RSF) $(TARGET).smdh $(TARGET).bnr romfs
-	@$(MAKEROM) -ver $(shell echo $$((($(VER_MAJOR)-2000)*256+$(VER_MINOR)*16+$(VER_PATCH)))) -f cia -target t -exefslogo -o $@ -elf $(EXECUTABLE) -rsf $(APP_RSF) -banner $(TARGET).bnr -icon $(TARGET).smdh -DAPP_ROMFS=romfs/
+	@$(MAKEROM) -ver $(LBA_CIA_VERSION) -f cia -target t -exefslogo -o $@ -elf $(EXECUTABLE) -rsf $(APP_RSF) -banner $(TARGET).bnr -icon $(TARGET).smdh -DAPP_ROMFS=romfs/
 	@echo built ... $(notdir $@)
 
 dist_3ds: $(TARGET).cia $(TARGET).3dsx $(DIST_FILES_DOCS)
