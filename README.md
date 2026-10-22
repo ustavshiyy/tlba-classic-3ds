@@ -301,7 +301,6 @@ Do not delete those directories if you want to preserve your saves.
 - `.3dsx` Homebrew Launcher build
 - Direct LBA startup with no visible ScummVM launcher
 - Automatic Steam / GOG Classic detection
-- Custom `GAME DATA NOT FOUND` screen
 - Full Circle Pad movement instead of the original tank-style controls
 - Custom dual-screen interface
 - Persistent lower-screen HUD
@@ -310,19 +309,9 @@ Do not delete those directories if you want to preserve your saves.
 - Holomap on the lower screen
 - Custom 3-slot player/save selector
 - Copy and delete save profiles
-- Original-style animated plasma selection
-- LBA-style fonts and UI
 - Life, magic, money, keys and clovers on the lower screen
-- Magic bar grows with Twinsen's actual magic level
 - `PAUSE` overlay on the upper screen
-- Original 4:3 movie presentation
 - Touch / button movie skipping
-- Correct lower-screen restoration after HOME Menu resume
-- Correct lower-screen restoration after sleep / wake
-- Improved HOME / application-exit handling
-- No dependency on New 3DS-only ZL/ZR buttons
-- ScummVM achievement popups hidden during gameplay
-- Final sequence adapted for the dual-screen layout
 - Full-game completion confirmed on real New Nintendo 3DS hardware
 
 ---
@@ -405,27 +394,7 @@ The 3DS frontend includes a custom LBA-style save/profile selector with:
 - Player-name entry
 - Copy save
 - Delete save
-- Original-style animated plasma selection
 
----
-
-# Movies
-
-Movies are displayed in their original **4:3 aspect ratio**, centered on the upper 400×240 screen rather than stretched to 5:3.
-
-Movies can be skipped using **B** or the touch screen.
-
-The lower screen stays clean during the adapted loading/movie transitions.
-
----
-
-# Final sequence
-
-The lower screen is intentionally disabled after normal gameplay ends and the final non-interactive sequence begins.
-
-Menus, inventory and saving are blocked during this sequence to prevent invalid end-game save states.
-
-The last valid normal-gameplay save remains available.
 
 ---
 
@@ -562,8 +531,7 @@ See [`COPYING`](COPYING) for details.
 ✅ Dual-screen HUD  
 ✅ Circle Pad direct movement  
 ✅ Inventory and Holomap integration  
-✅ Custom save/profile system  
-✅ 4:3 movies  
+✅ Custom save/profile system   
 ✅ HOME Menu / sleep resume fixes  
 ✅ Full game completed from beginning to end on real New Nintendo 3DS hardware  
 
