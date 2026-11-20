@@ -206,6 +206,8 @@ private:
 	Common::Rect _lowerScreenSaveActiveRect;
 	uint32 _lowerScreenLastUpdate = 0;
 	uint32 _lowerScreenHudSignature = 0xFFFFFFFFU;
+	int _lowerScreenLastHealth = -1;
+	uint32 _lowerScreenLastHealthUpdate = 0;
 	int _lowerScreenLastScreenChangeId = -1;
 	int32 _lowerScreenInventoryAngle = LBAAngles::ANGLE_45;
 	uint32 _lowerScreenInventoryRotateAt = 0;
@@ -227,6 +229,7 @@ private:
 	void drawLowerLbaText(const char *text, int x, int y, int width, uint32 color, bool centered = false);
 	int drawLowerLbaWrappedText(const char *text, int x, int y, int width, int maxLines, uint32 color, int firstLine = 0);
 	void drawLowerScreenHud();
+	void updateLowerScreenHealthBar(bool uploadOnly);
 	void drawLowerScreenInventory();
 	void copyFrontBufferToLowerScreen();
 	void ensureUpperScreenLogo();

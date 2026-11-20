@@ -212,6 +212,24 @@ void Music::stopMusic() {
 	stopMusicMidi();
 }
 
+void Music::fadeOutForTVMovie() {
+	if (!isMidiPlaying() && getMusicCD() == -1) {
+		return; // Do not delay silent videos.
+	}
+
+	Audio::Mixer *mixer = _engine->_system->getMixer();
+	const int originalVolume = mixer->getVolumeForSoundType(Audio::Mixer::kMusicSoundType);
+	// Short 240 ms fade, only for the currently playing background music.
+	// Restore the mixer's volume *after* stopping the track so sound effects
+	// and the video soundtrack are not left muted.
+	for (int step = 5; step >= 0; --step) {
+		musicVolume(originalVolume * step / 6);
+		_engine->_system->delayMillis(40);
+	}
+	stopMusic();
+	musicVolume(originalVolume);
+}
+
 void Music::stopMusicCD() {
 	AudioCDManager *cdrom = g_system->getAudioCDManager();
 	cdrom->stop();

@@ -28,6 +28,7 @@
 #include "twine/holomap.h"
 #include "twine/input.h"
 #include "twine/menu/interface.h"
+#include "twine/menu/menuoptions.h"
 #include "twine/movies.h"
 #include "twine/renderer/redraw.h"
 #include "twine/renderer/renderer.h"
@@ -2068,15 +2069,24 @@ int32 ScriptLife::lTEXT(TwinEEngine *engine, LifeScriptContext &ctx) {
 		char textStr[256];
 		engine->_text->getMenuText(textIdx, textStr, sizeof(textStr));
 		const int32 textSize = engine->_text->sizeFont(textStr);
-		int32 textBoxRight = textSize;
 		const int32 textBoxBottom = lTextYPos + textHeight;
-		engine->_text->setFontColor(COLOR_WHITE);
-		engine->_text->drawText(0, lTextYPos, textStr);
-		if (textSize > engine->width() - 1) {
-			textBoxRight = engine->width() - 1;
+		int32 textStartX = 0;
+		int32 textAreaWidth = engine->width();
+#ifdef __3DS__
+		// Credits are authored for a 4:3 screen with text starting at x=0.
+		// The 5:3 credits presentation masks the two extra side margins,
+		// so shift the SCRIPTED text into the original 4:3 viewport.
+		// Redraw::renderText() is unrelated to these LIFE::TEXT lines.
+		if (engine->_menuOptions->flagCredits &&
+		    engine->width() * 3 > engine->height() * 4) {
+			textAreaWidth = engine->height() * 4 / 3;
+			textStartX = (engine->width() - textAreaWidth) / 2;
 		}
-
-		engine->copyBlockPhys(0, lTextYPos, textBoxRight, textBoxBottom);
+#endif
+		const int32 textBoxRight = textStartX + MIN<int32>(textSize, textAreaWidth - 1);
+		engine->_text->setFontColor(COLOR_WHITE);
+		engine->_text->drawText(textStartX, lTextYPos, textStr);
+		engine->copyBlockPhys(textStartX, lTextYPos, textBoxRight, textBoxBottom);
 		lTextYPos += textHeight;
 	}
 

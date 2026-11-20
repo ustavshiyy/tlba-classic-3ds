@@ -241,6 +241,50 @@ void Grid::copyMask(int32 index, int32 x, int32 y, const Graphics::ManagedSurfac
 		return;
 	}
 
+#ifdef __3DS__
+	// The 5:3 viewport can reveal bricks which straddle the LCD edge. In
+	// widescreen, decode every mask with explicit bounds instead of forming
+	// potentially invalid pointers at (left, row) and walking across rows.
+	// Keep the original 4:3 renderer unchanged for the stable presentation.
+	if (_engine->width() * 3 > _engine->height() * 4) {
+		ptr += 4; // compressed mask header
+
+		// Mask rectangles use inclusive right/bottom; buffer dimensions do not.
+		const int32 visibleLeft = MAX<int32>(0, MAX<int32>(left, _engine->_interface->_clip.left));
+		const int32 visibleRight = MIN<int32>(MIN<int32>(_engine->_frontVideoBuffer.w, buffer.w),
+			MIN<int32>(right + 1, static_cast<int32>(_engine->_interface->_clip.right) + 1));
+		const int32 visibleTop = MAX<int32>(0, _engine->_interface->_clip.top);
+		const int32 visibleBottom = MIN<int32>(MIN<int32>(_engine->_frontVideoBuffer.h, buffer.h),
+			static_cast<int32>(_engine->_interface->_clip.bottom) + 1);
+
+		// Always consume each RLE row, including those outside the clip. A mask
+		// row alternates skip, copy, skip, copy ... starting with skip (which
+		// may be zero). processGridMask() produces exactly this representation.
+		for (int32 row = top; row <= bottom; ++row) {
+			const int32 numRuns = *ptr++;
+			int32 cursor = left;
+			bool copyRun = false;
+			const bool visibleRow = visibleLeft < visibleRight && row >= visibleTop && row < visibleBottom;
+			byte *out = visibleRow ? (byte *)_engine->_frontVideoBuffer.getBasePtr(0, row) : nullptr;
+			const byte *in = visibleRow ? (const byte *)buffer.getBasePtr(0, row) : nullptr;
+
+			for (int32 run = 0; run < numRuns; ++run) {
+				const int32 length = *ptr++;
+				if (copyRun && visibleRow && length > 0) {
+					const int32 start = MAX<int32>(visibleLeft, cursor);
+					const int32 stop = MIN<int32>(visibleRight, cursor + length);
+					if (stop > start) {
+						memcpy(out + start, in + start, stop - start);
+					}
+				}
+				cursor += length;
+				copyRun = !copyRun;
+			}
+		}
+		return;
+	}
+#endif
+
 	ptr += 4;
 
 	int32 absX = left;
@@ -326,39 +370,89 @@ const BrickEntry *Grid::getBrickEntry(int32 j, int32 i) const {
 	return &_listBrickColon[j * MAX_BRICKS + i];
 }
 
+#ifdef __3DS__
+// At 5:3 a foreground brick can extend well beyond its 24-pixel sorting
+// column. The old drawOverBrick() bucket range and hard-coded 38-pixel height
+// may skip a tree/palm mask even when it overlaps the actor's actual clip.
+// Test the real RLE-mask rectangle, not the column or a guessed brick size.
+static bool wideBrickMaskIntersectsClip(const BrickEntry &brick, const uint8 *mask,
+                                       const Common::Rect &clip) {
+	if (!mask || mask[0] == 0 || mask[1] == 0) {
+		return false;
+	}
+	const int32 left = brick.posX + mask[2];
+	const int32 top = brick.posY + mask[3];
+	const int32 right = left + mask[0] - 1;
+	const int32 bottom = top + mask[1] - 1;
+	return right >= clip.left && left <= clip.right &&
+	       bottom >= clip.top && top <= clip.bottom;
+}
+#endif
+
 void Grid::drawOverBrick(int32 x, int32 y, int32 z) {
-	const int32 startCol = ((_engine->_interface->_clip.left + 24) / 24) - 1;
-	const int32 endCol = ((_engine->_interface->_clip.right + 24) / 24);
+	const int32 maxCol = static_cast<int32>(_brickInfoBufferSize / sizeof(*_nbBrickColon)) - 1;
+	const bool wide = _engine->width() * 3 > _engine->height() * 4;
+	// Wider masks may overlap the clip from sorting columns beyond the legacy
+	// one-column margin. Scan all buckets only in the experimental 5:3 mode.
+	const int32 startCol = wide ? 0 : MAX<int32>(0, ((_engine->_interface->_clip.left + 24) / 24) - 1);
+	const int32 endCol = wide ? maxCol : MIN<int32>(maxCol, (_engine->_interface->_clip.right + 24) / 24);
 
 	for (int32 col = startCol; col <= endCol; col++) {
 		for (int32 i = 0; i < _nbBrickColon[col]; i++) {
 			const BrickEntry *currBrickEntry = getBrickEntry(col, i);
-
-			if (currBrickEntry->posY + 38 > _engine->_interface->_clip.top && currBrickEntry->posY <= _engine->_interface->_clip.bottom && currBrickEntry->y >= y) {
-				if (currBrickEntry->x + currBrickEntry->z > z + x) {
-					copyMask(currBrickEntry->index, (col * 24) - 24, currBrickEntry->posY, _engine->_workVideoBuffer);
+			if (currBrickEntry->y < y) {
+				continue;
+			}
+#ifdef __3DS__
+			if (wide) {
+				if (!wideBrickMaskIntersectsClip(*currBrickEntry, _brickMaskTable[currBrickEntry->index],
+				                                 _engine->_interface->_clip)) {
+					continue;
 				}
+			} else
+#endif
+			if (!(currBrickEntry->posY + 38 > _engine->_interface->_clip.top &&
+			      currBrickEntry->posY <= _engine->_interface->_clip.bottom)) {
+				continue;
+			}
+
+			if (currBrickEntry->x + currBrickEntry->z > z + x) {
+				copyMask(currBrickEntry->index, currBrickEntry->posX, currBrickEntry->posY, _engine->_workVideoBuffer);
 			}
 		}
 	}
 }
 
 void Grid::drawOverBrick3(int32 x, int32 y, int32 z) {
-	const int32 startCol = ((_engine->_interface->_clip.left + 24) / 24) - 1;
-	const int32 endCol = (_engine->_interface->_clip.right + 24) / 24;
+	const int32 maxCol = static_cast<int32>(_brickInfoBufferSize / sizeof(*_nbBrickColon)) - 1;
+	const bool wide = _engine->width() * 3 > _engine->height() * 4;
+	const int32 startCol = wide ? 0 : MAX<int32>(0, ((_engine->_interface->_clip.left + 24) / 24) - 1);
+	const int32 endCol = wide ? maxCol : MIN<int32>(maxCol, (_engine->_interface->_clip.right + 24) / 24);
 
 	for (int32 col = startCol; col <= endCol; col++) {
 		for (int32 i = 0; i < _nbBrickColon[col]; i++) {
 			const BrickEntry *currBrickEntry = getBrickEntry(col, i);
-
-			if (currBrickEntry->posY + 38 > _engine->_interface->_clip.top && currBrickEntry->posY <= _engine->_interface->_clip.bottom && currBrickEntry->y >= y) {
-				if (currBrickEntry->x == x && currBrickEntry->z == z) {
-					copyMask(currBrickEntry->index, (col * 24) - 24, currBrickEntry->posY, _engine->_workVideoBuffer);
+			if (currBrickEntry->y < y) {
+				continue;
+			}
+#ifdef __3DS__
+			if (wide) {
+				if (!wideBrickMaskIntersectsClip(*currBrickEntry, _brickMaskTable[currBrickEntry->index],
+				                                 _engine->_interface->_clip)) {
+					continue;
 				}
+			} else
+#endif
+			if (!(currBrickEntry->posY + 38 > _engine->_interface->_clip.top &&
+			      currBrickEntry->posY <= _engine->_interface->_clip.bottom)) {
+				continue;
+			}
 
-				if (currBrickEntry->x > x || currBrickEntry->z > z) {
-					copyMask(currBrickEntry->index, (col * 24) - 24, currBrickEntry->posY, _engine->_workVideoBuffer);
-				}
+			if (currBrickEntry->x == x && currBrickEntry->z == z) {
+				copyMask(currBrickEntry->index, currBrickEntry->posX, currBrickEntry->posY, _engine->_workVideoBuffer);
+			}
+			if (currBrickEntry->x > x || currBrickEntry->z > z) {
+				copyMask(currBrickEntry->index, currBrickEntry->posX, currBrickEntry->posY, _engine->_workVideoBuffer);
 			}
 		}
 	}
@@ -918,23 +1012,48 @@ void Grid::drawBrickBlock(int32 blockIdx, int32 brickBlockIdx, int32 x, int32 y,
 
 	map2Screen(x - _startCube.x, y - _startCube.y, z - _startCube.z, brickPixelPosX, brickPixelPosY);
 
-	if (brickPixelPosX < -24) {
-		return;
-	}
-	if (brickPixelPosX >= _engine->width()) {
-		return;
-	}
-	if (brickPixelPosY < -38) {
-		return;
-	}
-	if (brickPixelPosY >= _engine->height()) {
-		return;
+	const bool wide = _engine->width() * 3 > _engine->height() * 4;
+#ifdef __3DS__
+	if (wide) {
+		// The old -24/-38 cutoffs assume a viewport whose projection origin
+		// is aligned to the 24-pixel brick grid. In 800x480 the origin has an
+		// additional 8-pixel offset: a brick starting at x=-40 can still draw
+		// pixels at x=0..7. Culling it creates the comb-shaped left border.
+		// Use the true encoded sprite bounds (including its own offsets).
+		const uint8 *graphic = _bufferBrick[numBrick - 1];
+		if (!graphic) {
+			return;
+		}
+		const int32 visibleLeft = brickPixelPosX + graphic[2];
+		const int32 visibleTop = brickPixelPosY + graphic[3];
+		if (visibleLeft + graphic[0] <= 0 || visibleLeft >= _engine->width() ||
+		    visibleTop + graphic[1] <= 0 || visibleTop >= _engine->height()) {
+			return;
+		}
+	} else
+#endif
+	{
+		if (brickPixelPosX < -24 || brickPixelPosX >= _engine->width() ||
+		    brickPixelPosY < -38 || brickPixelPosY >= _engine->height()) {
+			return;
+		}
 	}
 
-	// draw the background brick
+	// Draw the background brick and store the very same origin for the mask.
 	drawGraph(numBrick - 1, brickPixelPosX, brickPixelPosY);
 
 	int32 col = (brickPixelPosX + 24) / 24;
+#ifdef __3DS__
+	// A partly visible brick may have a negative sorting bucket in 5:3.
+	// Keep it in bucket zero so it can still occlude actors near the LCD edge.
+	if (wide && col < 0) {
+		col = 0;
+	}
+#endif
+	const int32 numCols = static_cast<int32>(_brickInfoBufferSize / sizeof(*_nbBrickColon));
+	if (col < 0 || col >= numCols) {
+		return;
+	}
 
 	if (_nbBrickColon[col] >= MAX_BRICKS) {
 		warning("GRID: brick buffer exceeded");

@@ -41,6 +41,19 @@
 
 namespace TwinE {
 
+// Fixed-resolution artwork (logos, intro cards, background images) is 4:3.
+// Widen the gameplay viewport, not the authored art. The bars are deliberate.
+static Common::Rect classicPresentationRect(const Graphics::ManagedSurface &target) {
+#ifdef __3DS__
+	if (target.w * 3 > target.h * 4) {
+		const int contentWidth = target.h * 4 / 3;
+		const int left = (target.w - contentWidth) / 2;
+		return Common::Rect(left, 0, left + contentWidth, target.h);
+	}
+#endif
+	return target.getBounds();
+}
+
 int32 Screens::mapLba2Palette(int32 palIndex) {
 	// LBA2 palette indices:
 	// 0 = PtrPalNormal (main palette from ress.hqr index 0)
@@ -129,12 +142,34 @@ void Screens::loadImage(TwineImage image, bool fadeIn) {
 	}
 	debugC(1, TwinE::kDebugResources, "Load image: %i", image.image.index);
 	Graphics::ManagedSurface& target = _engine->_frontVideoBuffer;
-	target.blitFrom(src, src.getBounds(), target.getBounds());
+	const Common::Rect dest = classicPresentationRect(target);
 	const Graphics::Palette *pal = &_ptrPal;
 	if (image.palette.index != -1) {
 		loadCustomPalette(image.palette);
 		pal = &_palettePcx;
 	}
+	if (dest != target.getBounds()) {
+		uint8 borderColor = COLOR_BLACK;
+#ifdef __3DS__
+		// Only the Adeline logo has a white background. Find the
+		// brightest *neutral* entry in its own palette so the sidebars
+		// blend into the artwork even during palette fades.
+		if (_engine->isLBA1() && image.image.index == 27) {
+			int brightest = -1;
+			for (uint i = 0; i < pal->size(); ++i) {
+				byte r, g, b;
+				pal->get(i, r, g, b);
+				const int neutralBrightness = MIN<int>(r, MIN<int>(g, b));
+				if (neutralBrightness > brightest) {
+					brightest = neutralBrightness;
+					borderColor = static_cast<uint8>(i);
+				}
+			}
+		}
+#endif
+		target.fillRect(target.getBounds(), borderColor);
+	}
+	target.blitFrom(src, src.getBounds(), dest);
 	if (fadeIn) {
 		fadeToPal(*pal);
 	} else {
@@ -170,17 +205,21 @@ static bool loadImageDelayViaDecoder(TwinEEngine *engine, const Common::Path &fi
 		return false;
 	}
 	Graphics::ManagedSurface &target = engine->_frontVideoBuffer;
+	const Common::Rect dest = classicPresentationRect(target);
+	if (dest != target.getBounds()) {
+		target.fillRect(target.getBounds(), COLOR_BLACK);
+	}
 	Common::Rect rect(src->w, src->h);
 	if (!decoder.hasPalette()) {
 		uint8 pal[Graphics::PALETTE_SIZE];
 		engine->_frontVideoBuffer.getPalette(pal, 0, 256);
 		Graphics::Surface *source = decoder.getSurface()->convertTo(target.format, nullptr, 0, pal, 256);
-		target.blitFrom(*source, rect, target.getBounds());
+		target.blitFrom(*source, rect, dest);
 		source->free();
 		delete source;
 	} else {
 		engine->setPalette(0, decoder.getPalette().size(), decoder.getPalette().data());
-		target.blitFrom(*src, rect, target.getBounds());
+		target.blitFrom(*src, rect, dest);
 	}
 	if (engine->delaySkip(1000 * seconds)) {
 		return true;

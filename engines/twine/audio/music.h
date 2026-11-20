@@ -101,6 +101,12 @@ public:
 	/** Stop MIDI and Track music */
 	void stopMusic();
 
+	/** Fade and stop the current background track before an in-world TV movie.
+	 *  Restores the user's music volume afterwards so the movie's own audio
+	 *  is still audible; music resumes normally at the next scene change.
+	 */
+	void fadeOutForTVMovie();
+
 	bool isMidiPlaying() const;
 	int32 getMusicCD();
 };

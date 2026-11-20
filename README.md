@@ -2,13 +2,24 @@
 
 A Nintendo 3DS port of **Little Big Adventure / Relentless: Twinsen's Adventure**, built on top of the ScummVM **TwinE** engine and adapted specifically for the dual-screen Nintendo 3DS interface.
 
-> **Current stable release: v0.2.0**
+> **Current stable release: v0.2.1**
 
 LBA Classic 3DS v0.2.0 can be installed directly to the Nintendo 3DS HOME Menu as a **CIA**, or launched through the Homebrew Launcher as a **3DSX**.
 
 The ScummVM launcher is completely hidden: when valid game data is present, LBA Classic 3DS starts directly into its own save/profile screen.
 
 ---
+
+## What's new in v0.2.1
+
+- True 5:3 widescreen gameplay with a wider view of the world
+- Improved performance when Twinsen takes multiple hits
+- Faster lower-screen health bar updates
+- Hold-to-attack behaviour for the Magic Sabre
+- SELECT toggles inventory; START toggles the pause menu
+- In-game movies adapted to fill the upper screen
+- Background music fades out when watching TV videos
+- Removed unwanted 3DS backend notifications from L/R
 
 # Installation
 
@@ -32,13 +43,13 @@ The original game data is **not included** with LBA Classic 3DS.
 Download:
 
 ```text
-lba-classic-3ds-v0.2.0.cia
+lba-classic-3ds-v0.2.1.cia
 ```
 
 Copy it anywhere convenient on your SD card, for example:
 
 ```text
-SD:/cias/lba-classic-3ds-v0.2.0.cia
+SD:/cias/lba-classic-3ds-v0.2.1.cia
 ```
 
 Open **FBI** and install the CIA.
@@ -49,7 +60,7 @@ For example:
 FBI
 → SD
 → cias
-→ lba-classic-3ds-v0.2.0.cia
+→ lba-classic-3ds-v0.2.1.cia
 → Install and delete CIA
 ```
 
@@ -70,7 +81,7 @@ The final directory structure should look like this:
 ```text
 SD:/
 ├── cias/
-│   └── lba-classic-3ds-v0.2.0.cia
+│   └── lba-classic-3ds-v0.2.1.cia
 │
 └── 3ds/
     └── lba-classic-3ds/
@@ -209,13 +220,13 @@ screen with the expected SD-card path.
 
 ## Updating from an older CIA build
 
-LBA Classic 3DS v0.2.0 uses:
+LBA Classic 3DS v0.2.1 uses:
 
 ```text
 Title:         LBA Classic 3DS
 Publisher:     ltlo
 Product Code:  CTR-P-LBAC
-Title Version: 32 (0.2.0)
+Title Version: 33 (0.2.1)
 ```
 
 The project keeps the same internal title identity across the v0.2.0 test/stable builds.
@@ -241,7 +252,7 @@ Still, making a backup before updating is recommended.
 If you prefer the Homebrew Launcher version, download:
 
 ```text
-lba-classic-3ds-v0.2.0.3dsx
+lba-classic-3ds-v0.2.1.3dsx
 ```
 
 Create:
@@ -413,7 +424,7 @@ Title:         LBA Classic 3DS
 Description:   Little Big Adventure Classic
 Publisher:     ltlo
 Product Code:  CTR-P-LBAC
-Title Version: 32 (0.2.0)
+Title Version: 33 (0.2.1)
 ```
 
 ---

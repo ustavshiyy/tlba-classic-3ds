@@ -41,11 +41,59 @@
 #include "twine/resources/hqr.h"
 #include "twine/resources/resources.h"
 #include "twine/scene/grid.h"
+#include "twine/scene/scene.h"
 #include "twine/shared.h"
 #include "twine/twine.h"
 #include "video/smk_decoder.h"
 
 namespace TwinE {
+
+// Movies are pre-rendered 4:3 assets. In the experimental 5:3 gameplay mode,
+// center them at their original aspect ratio and leave sidebars untouched.
+static Common::Rect classicMovieRect(const Graphics::ManagedSurface &target) {
+#ifdef __3DS__
+	if (target.w * 3 > target.h * 4) {
+		const int contentWidth = target.h * 4 / 3;
+		const int left = (target.w - contentWidth) / 2;
+		return Common::Rect(left, 0, left + contentWidth, target.h);
+	}
+#endif
+	return target.getBounds();
+}
+
+// On the 3DS, in-game cutscenes (including Twinsen's INTROD dream)
+// may fill the 5:3 upper LCD. The initial DRAGON3 startup movie
+// remains in its original 4:3 presentation.
+// The option can be disabled with lba3ds_fullscreen_movies=false.
+static bool classicFullscreenMoviesEnabled() {
+#ifdef __3DS__
+	return !ConfMan.hasKey("lba3ds_fullscreen_movies") || ConfMan.getBool("lba3ds_fullscreen_movies");
+#else
+	return false;
+#endif
+}
+
+// Scale to fill without changing the aspect ratio of the *visible* content.
+// The caller may already have removed black bars baked into a GIF image.
+static Common::Rect classicMovieSourceCrop(Common::Rect src, const Common::Rect &dest) {
+	const int sw = src.width();
+	const int sh = src.height();
+	const int dw = dest.width();
+	const int dh = dest.height();
+	if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) {
+		return src;
+	}
+	if (sw * dh > sh * dw) {
+		const int cropW = MAX(1, sh * dw / dh);
+		src.left += (sw - cropW) / 2;
+		src.right = src.left + cropW;
+	} else if (sw * dh < sh * dw) {
+		const int cropH = MAX(1, sw * dh / dw);
+		src.top += (sh - cropH) / 2;
+		src.bottom = src.top + cropH;
+	}
+	return src;
+}
 
 /** FLA Frame Opcode types */
 enum FlaFrameOpcode {
@@ -386,7 +434,17 @@ void Movies::prepareGIF(int index) {
 		}
 	}
 #endif
-	target.blitFrom(*surface, surfaceBounds, target.getBounds());
+	// FLAGIF 1-2 are the initial DRAGON3 movie; 3-5 are the
+	// *in-game* INTROD dream after the three introduction text screens.
+	// Keep only the startup movie at 4:3.
+	const bool fillScreen = _engine->isLBA1() && index > 2 &&
+	                        target.w * 3 > target.h * 4 && classicFullscreenMoviesEnabled();
+	const Common::Rect dest = fillScreen ? target.getBounds() : classicMovieRect(target);
+	if (dest != target.getBounds()) {
+		target.fillRect(target.getBounds(), COLOR_BLACK);
+	}
+	const Common::Rect movieSrc = fillScreen ? classicMovieSourceCrop(surfaceBounds, dest) : surfaceBounds;
+	target.blitFrom(*surface, movieSrc, dest);
 	debugC(1, TwinE::kDebugMovies, "Show gif with id %i from %s", index, Resources::HQR_FLAGIF_FILE);
 	delete stream;
 	_engine->delaySkip(5000);
@@ -459,6 +517,17 @@ bool Movies::playMovie(const char *name) { // PlayAnimFla
 		return playSmkMovie(name, index);
 	}
 
+#ifdef __3DS__
+	// In the house with the TV (Principal Island), playing a recorded film
+	// should fade the room's background music. Leave the music stopped until
+	// the next location starts its own scene track. This does not affect
+	// intro, travel or story movies elsewhere.
+	if (_engine->isLBA1() &&
+	    _engine->_scene->_numCube == LBA1SceneId::Principal_Island_House_with_the_TV) {
+		_engine->_music->fadeOutForTVMovie();
+	}
+#endif
+
 	Common::String fileNamePath = name;
 	const size_t n = fileNamePath.findLastOf(".");
 	if (n != Common::String::npos) {
@@ -468,6 +537,9 @@ bool Movies::playMovie(const char *name) { // PlayAnimFla
 	Common::String lowerMovieName = fileNamePath;
 	lowerMovieName.toLowercase();
 	const bool islandTravelMovie = lowerMovieName == "bateau" || lowerMovieName == "bateau2";
+	const bool fillMovieScreen = _engine->isLBA1() &&
+	                             lowerMovieName != "dragon3" && lowerMovieName != "intro" &&
+	                             classicFullscreenMoviesEnabled();
 #endif
 
 	if (_engine->_cfgfile.Movie == CONF_MOVIE_FLAGIF) {
@@ -540,7 +612,18 @@ bool Movies::playMovie(const char *name) { // PlayAnimFla
 			}
 			drawNextFrameFla();
 			scaleFla2x();
-			_engine->_frontVideoBuffer.blitFrom(_engine->_imageBuffer, _engine->_imageBuffer.getBounds(), _engine->_frontVideoBuffer.getBounds());
+			Graphics::ManagedSurface &target = _engine->_frontVideoBuffer;
+			bool fillScreen = false;
+#ifdef __3DS__
+			fillScreen = fillMovieScreen && target.w * 3 > target.h * 4;
+#endif
+			const Common::Rect dest = fillScreen ? target.getBounds() : classicMovieRect(target);
+			if (dest != target.getBounds()) {
+				target.fillRect(target.getBounds(), COLOR_BLACK);
+			}
+			const Common::Rect movieSrc = fillScreen ? classicMovieSourceCrop(_engine->_imageBuffer.getBounds(), dest)
+			                                         : _engine->_imageBuffer.getBounds();
+			target.blitFrom(_engine->_imageBuffer, movieSrc, dest);
 
 			// Only blit to screen if isn't a fade
 			if (_fadeOut == -1) {
@@ -662,7 +745,11 @@ bool Movies::playSmkMovie(const char *name, int index) {
 
 			Graphics::ManagedSurface& target = _engine->_frontVideoBuffer;
 			const Common::Rect frameBounds(0, 0, frameSurf->w, frameSurf->h);
-			target.blitFrom(*frameSurf, frameBounds, target.getBounds());
+			const Common::Rect dest = classicMovieRect(target);
+			if (dest != target.getBounds()) {
+				target.fillRect(target.getBounds(), COLOR_BLACK);
+			}
+			target.blitFrom(*frameSurf, frameBounds, dest);
 		}
 	}
 

@@ -322,14 +322,14 @@ Common::KeymapArray OSystem_3DS::getGlobalKeymaps() {
 
 	Action *act;
 
+	// L/R are part of LBA's own controls. The ScummVM 3DS backend
+	// must not steal them to toggle Drag/Magnify or display its OSD.
 	act = new Action("DRAGM", _("Toggle Drag Mode"));
 	act->setCustomBackendActionEvent(k3DSEventToggleDragMode);
-	act->addDefaultInputMapping("JOY_RIGHT_SHOULDER");
 	keymap->addAction(act);
 
 	act = new Action("MAGM", _("Toggle Magnify Mode"));
 	act->setCustomBackendActionEvent(k3DSEventToggleMagnifyMode);
-	act->addDefaultInputMapping("JOY_LEFT_SHOULDER");
 	keymap->addAction(act);
 
 	return Keymap::arrayOf(keymap);
@@ -400,6 +400,13 @@ bool OSystem_3DS::notifyEvent(const Common::Event &event) {
 
 	if (event.type == Common::EVENT_CUSTOM_BACKEND_ACTION_END) {
 		return true; // We'll say we have handled the event so it is not propagated
+	}
+
+	// Also swallow bindings saved by older ScummVM configurations.
+	// These backend toggles are intentionally disabled in LBA Classic 3DS.
+	if (event.customType == k3DSEventToggleDragMode ||
+	    event.customType == k3DSEventToggleMagnifyMode) {
+		return true;
 	}
 
 	switch ((_3DSCustomEvent)event.customType) {

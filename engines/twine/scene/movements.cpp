@@ -454,6 +454,15 @@ void Movements::processManualAction(int actorIdx) {
 			_engine->_animations->initAnim(AnimationTypes::kStanding, AnimType::kAnimationTypeRepeat, AnimationTypes::kNoAnim, actorIdx);
 		}
 
+		// Match the magic-ball hold behaviour for the sabre: releasing R must
+		// stop the swing instead of finishing the attack automatically. Also
+		// clear the active hit state to avoid a late collision after release.
+		if (!magicBallHeld && actor->_genAnim == AnimationTypes::kSabreAttack) {
+			_engine->_animations->initAnim(AnimationTypes::kStanding, AnimType::kAnimationTypeRepeat, AnimationTypes::kNoAnim, actorIdx);
+			actor->_hitForce = 0;
+			actor->_workFlags.bIsHitting = 0;
+		}
+
 		// Holding R keeps requesting an attack. While the magic ball is in
 		// flight nothing happens; as soon as it returns (_magicBall == -1), a
 		// new throw starts automatically. The same held-button semantics also

@@ -30,6 +30,7 @@
 #include "twine/input.h"
 #include "twine/menu/interface.h"
 #include "twine/menu/menu.h"
+#include "twine/menu/menuoptions.h"
 #include "twine/parser/body.h"
 #include "twine/parser/sprite.h"
 #include "twine/renderer/renderer.h"
@@ -916,6 +917,22 @@ void Redraw::drawScene(bool flagflip) { // AffScene
 	processDrawList(drawList, drawListPos, flagflip);
 
 	_engine->_debugState->renderDebugView();
+
+#ifdef __3DS__
+	// Mask the 5:3 off-stage scenery BEFORE drawing credit text and overlays.
+	// Drawing the black margins after renderText() clipped scrolling credits.
+	if (_engine->_menuOptions->flagCredits && _engine->width() * 3 > _engine->height() * 4) {
+		const int side = (_engine->width() - _engine->height() * 4 / 3) / 2;
+		if (side > 0) {
+			const Common::Rect left(0, 0, side, _engine->height());
+			const Common::Rect right(_engine->width() - side, 0, _engine->width(), _engine->height());
+			_engine->_frontVideoBuffer.fillRect(left, COLOR_BLACK);
+			_engine->_frontVideoBuffer.fillRect(right, COLOR_BLACK);
+			addPhysBox(left);
+			addPhysBox(right);
+		}
+	}
+#endif
 
 	renderOverlays();
 	renderText();

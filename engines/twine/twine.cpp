@@ -506,6 +506,17 @@ Common::Error TwinEEngine::run() {
 		w = 1024;
 		h = 768;
 	}
+#ifdef __3DS__
+	// Experimental true 5:3 viewport: draw MORE world, never stretch a 4:3
+	// game image. 800x480 maps precisely to the 400x240 upper LCD.
+	// For A/B testing set lba3ds_widescreen=false in scummvm.ini.
+	// Keep LBA2 and explicit high-res settings unchanged.
+	ConfMan.registerDefault("lba3ds_widescreen", true);
+	if (isLBA1() && !highRes && ConfMan.getBool("lba3ds_widescreen")) {
+		w = 800;
+		h = 480;
+	}
+#endif
 
 	initGraphics(w, h);
 	allocVideoMemory(w, h);

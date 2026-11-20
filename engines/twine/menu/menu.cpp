@@ -525,6 +525,11 @@ int32 Menu::doGameMenu(MenuSettings *menuSettings) {
 	const bool renderOnLower = _lowerScreenClassicMenuActive && _engine->_scene->isGameRunning();
 	bool touchActivate = false;
 	uint32 lowerMenuLastPresent = 0;
+	// START closes the same in-game pause menu it opened. Record the
+	// initial held state so the opening press cannot immediately close it.
+	const bool startClosesPause = renderOnLower &&
+	    (menuSettings == &_giveUpMenuState || menuSettings == &_giveUpMenuWithSaveState);
+	bool pauseStartWasHeld = (hidKeysHeld() & KEY_START) != 0;
 	// Touch/D-pad own this UI on 3DS. Never leave the desktop-style mouse
 	// pointer painted over the lower-screen LBA menu.
 	if (renderOnLower) {
@@ -549,6 +554,13 @@ int32 Menu::doGameMenu(MenuSettings *menuSettings) {
 		const uint32 loopMillis = _engine->_system->getMillis();
 		_engine->readKeys();
 #ifdef __3DS__
+		if (startClosesPause) {
+			const bool startHeld = (hidKeysHeld() & KEY_START) != 0;
+			if (startHeld && !pauseStartWasHeld) {
+				return (int32)TextId::kContinue;
+			}
+			pauseStartWasHeld = startHeld;
+		}
 		if (renderOnLower) {
 			Common::Point tap;
 			if (_engine->_input->consumeLowerScreenTap(tap)) {
@@ -1668,17 +1680,19 @@ void Menu::drawLowerLbaText(const char *text, int x, int y, int width, uint32 co
 		return;
 	}
 
-	const int srcW = _engine->_frontVideoBuffer.w;
+	const int bufferW = _engine->_frontVideoBuffer.w;
 	const int srcH = _engine->_frontVideoBuffer.h;
+	const int srcW = MIN(bufferW, srcH * 4 / 3);
+	const int cropX = (bufferW - srcW) / 2;
 	if (srcW <= 0 || srcH <= 0) {
 		return;
 	}
 
-	if (_lowerScreenTextBackup.w != srcW ||
+	if (_lowerScreenTextBackup.w != bufferW ||
 	    _lowerScreenTextBackup.h != srcH ||
 	    _lowerScreenTextBackup.format != _engine->_frontVideoBuffer.format) {
 		_lowerScreenTextBackup.free();
-		_lowerScreenTextBackup.create(srcW, srcH, _engine->_frontVideoBuffer.format);
+		_lowerScreenTextBackup.create(bufferW, srcH, _engine->_frontVideoBuffer.format);
 	}
 	_lowerScreenTextBackup.blitFrom(_engine->_frontVideoBuffer);
 
@@ -1690,7 +1704,7 @@ void Menu::drawLowerLbaText(const char *text, int x, int y, int width, uint32 co
 	_engine->_text->setFont(INTER_LEAVE, INTER_SPACE);
 	_engine->_text->setFontColor(COLOR_WHITE);
 
-	const int nativeX = x * srcW / 320;
+	const int nativeX = cropX + x * srcW / 320;
 	const int nativeY = y * srcH / 240;
 	const int nativeWidth = MAX(1, width * srcW / 320);
 	int drawX = nativeX;
@@ -1710,13 +1724,13 @@ void Menu::drawLowerLbaText(const char *text, int x, int y, int width, uint32 co
 		const int sy0 = dy * srcH / 240;
 		const int sy1 = MAX(sy0 + 1, (dy + 1) * srcH / 240);
 		for (int dx = left; dx < right; ++dx) {
-			const int sx0 = dx * srcW / 320;
-			const int sx1 = MAX(sx0 + 1, (dx + 1) * srcW / 320);
+			const int sx0 = cropX + dx * srcW / 320;
+			const int sx1 = cropX + MAX(dx * srcW / 320 + 1, (dx + 1) * srcW / 320);
 			int inkPixels = 0;
 			int samplePixels = 0;
 			for (int sy = sy0; sy < MIN(sy1, srcH); ++sy) {
 				const byte *src = (const byte *)_engine->_frontVideoBuffer.getBasePtr(0, sy);
-				for (int sx = sx0; sx < MIN(sx1, srcW); ++sx) {
+				for (int sx = sx0; sx < MIN(sx1, bufferW); ++sx) {
 					++samplePixels;
 					if (src[sx] != COLOR_BLACK) {
 						++inkPixels;
@@ -1741,7 +1755,8 @@ int Menu::drawLowerLbaWrappedText(const char *text, int x, int y, int width, int
 	}
 
 	_engine->_text->setFont(INTER_LEAVE, INTER_SPACE);
-	const int nativeWidth = MAX(1, width * _engine->_frontVideoBuffer.w / 320);
+	const int nativeWidth = MAX(1, width * MIN(static_cast<int>(_engine->_frontVideoBuffer.w),
+	                        _engine->_frontVideoBuffer.h * 4 / 3) / 320);
 	const char *p = text;
 	Common::String line;
 	int logicalLine = 0;
@@ -1786,6 +1801,28 @@ int Menu::drawLowerLbaWrappedText(const char *text, int x, int y, int width, int
 		emitLine(line);
 	}
 	return logicalLine;
+}
+
+// HP-only changes must not rebuild the expensive 3D behaviour portraits and
+// inventory models. Keep the CPU overlay in sync and upload only the health bar
+// when the rest of the HUD has not changed.
+void Menu::updateLowerScreenHealthBar(bool uploadOnly) {
+	if (_lowerScreenSurface.w != 320 || _lowerScreenSurface.h != 240 || !_engine->_scene->_sceneHero) {
+		return;
+	}
+	const Graphics::PixelFormat fmt = g_system->getOverlayFormat();
+	const int barLeft = 8;
+	const int barRight = 193;
+	const int barWidth = barRight - barLeft;
+	const int hpValue = CLIP<int>(_engine->_scene->_sceneHero->_lifePoint, 0, _engine->getMaxLife());
+	const int hpFill = barLeft + barWidth * hpValue / MAX(1, _engine->getMaxLife());
+	_lowerScreenSurface.fillRect(Common::Rect(barLeft, 9, barRight, 20), fmt.RGBToColor(44, 47, 64));
+	_lowerScreenSurface.fillRect(Common::Rect(barLeft, 9, hpFill, 20), fmt.RGBToColor(218, 63, 91));
+	drawLowerScreenFrame(Common::Rect(barLeft, 9, barRight, 20), fmt.RGBToColor(104, 110, 143));
+	if (uploadOnly) {
+		g_system->copyRectToOverlay(_lowerScreenSurface.getBasePtr(barLeft, 9),
+		                            _lowerScreenSurface.pitch, barLeft, 9, barWidth, 11);
+	}
 }
 
 void Menu::drawLowerScreenHud() {
@@ -1856,7 +1893,6 @@ void Menu::drawLowerScreenHud() {
 	const uint32 selected = fmt.RGBToColor(67, 158, 220);
 	const uint32 gold = fmt.RGBToColor(230, 184, 60);
 	const uint32 goldDark = fmt.RGBToColor(153, 105, 25);
-	const uint32 hpColor = fmt.RGBToColor(218, 63, 91);
 	const uint32 mpColor = fmt.RGBToColor(62, 153, 218);
 	const uint32 leafGreen = fmt.RGBToColor(70, 176, 91);
 
@@ -1877,11 +1913,7 @@ void Menu::drawLowerScreenHud() {
 	const int barLeft = 8;
 	const int barRight = 193;
 	const int barWidth = barRight - barLeft;
-	const int hpValue = CLIP<int>(_engine->_scene->_sceneHero->_lifePoint, 0, _engine->getMaxLife());
-	const int hpFill = barLeft + barWidth * hpValue / MAX(1, _engine->getMaxLife());
-	_lowerScreenSurface.fillRect(Common::Rect(barLeft, 9, barRight, 20), fmt.RGBToColor(44, 47, 64));
-	_lowerScreenSurface.fillRect(Common::Rect(barLeft, 9, hpFill, 20), hpColor);
-	drawLowerScreenFrame(Common::Rect(barLeft, 9, barRight, 20), border);
+	updateLowerScreenHealthBar(false);
 
 	// Match the original upper-screen magic bar: its *capacity* grows by one
 	// quarter for each acquired magic level instead of always spanning the full
@@ -2078,7 +2110,9 @@ void Menu::updateLowerScreenBehaviourPanel() {
 		signature ^= value;
 		signature *= 16777619U;
 	};
-	mix((uint32)hero->_lifePoint);
+	// HP is tracked separately: it only changes the tiny lower-screen bar.
+	// Rebuilding 3D portraits on every shotgun pellet caused avoidable stalls.
+	const int currentHealth = CLIP<int>(hero->_lifePoint, 0, _engine->getMaxLife());
 	mix((uint32)_engine->_gameState->_magicPoint);
 	mix((uint32)_engine->_gameState->_magicLevelIdx);
 	mix((uint32)_engine->_gameState->_goldPieces);
@@ -2102,11 +2136,16 @@ void Menu::updateLowerScreenBehaviourPanel() {
 	const uint32 now = g_system->getMillis();
 	if (!overlayWasLost && !displayWasResumed && !_lowerScreenFadeInPending && _lowerScreenLastUpdate != 0) {
 		if (signature == _lowerScreenHudSignature) {
+			// Only health changed: update the 185x11 bar without redrawing the
+			// 3D portraits and inventory icons or touching the upper-screen framebuffer.
+			// Limit overlay transfers to 10 Hz during rapid multi-pellet hits.
+			if (currentHealth != _lowerScreenLastHealth && now - _lowerScreenLastHealthUpdate >= 100) {
+				updateLowerScreenHealthBar(true);
+				_lowerScreenLastHealth = currentHealth;
+				_lowerScreenLastHealthUpdate = now;
+			}
 			return;
 		}
-		// Rapid damage (for example shotgun pellets) used to rebuild four 3D
-		// behaviour portraits for every hit. Cap HUD rebuilds at 10 Hz; the game
-		// state itself is unaffected and the bar catches up on the next refresh.
 		if (now - _lowerScreenLastUpdate < 100) {
 			return;
 		}
@@ -2117,6 +2156,8 @@ void Menu::updateLowerScreenBehaviourPanel() {
 	_lowerScreenHudSignature = signature;
 	_lowerScreenLastUpdate = now;
 	drawLowerScreenHud();
+	_lowerScreenLastHealth = currentHealth;
+	_lowerScreenLastHealthUpdate = now;
 	if (_lowerScreenFadeInPending) {
 		_lowerScreenFadeInPending = false;
 		fadeLowerScreenFromBlack();
@@ -2236,9 +2277,18 @@ void Menu::inventory3DS() {
 	_lowerScreenInventoryRotateAt = g_system->getMillis();
 	drawLowerScreenInventory();
 
+	// SELECT opens inventory in gameplay. Wait for its release before treating
+	// the next press as "close", so the opening press cannot instantly exit.
+	bool selectWasDown = (hidKeysHeld() & KEY_SELECT) != 0;
 	for (;;) {
 		FrameMarker frame(_engine, 60);
 		_engine->readKeys();
+		const bool selectDown = (hidKeysHeld() & KEY_SELECT) != 0;
+		const bool closeWithSelect = selectDown && !selectWasDown;
+		selectWasDown = selectDown;
+		if (closeWithSelect) {
+			break;
+		}
 
 		// Match the original inventory feel: only the focused item rotates. A
 		// modest ~13 fps refresh keeps the motion smooth enough on the small LCD
@@ -2462,12 +2512,16 @@ void Menu::showLowerScreenKeyboard(const char *typedText, int selectedX, int sel
 		}
 	}
 
-	// Bottom row follows exactly the current 3DS touch hitboxes, only rendered
-	// with the original LBA font/buttons.
-	const Common::Rect caseRect(30, 384, 136, 440);
-	const Common::Rect spaceRect(142, 384, 356, 440);
-	const Common::Rect delRect(362, 384, 476, 440);
-	const Common::Rect okRect(482, 384, 610, 440);
+	// The lower LCD always samples the centered 640x480 area of the native
+	// framebuffer. Keep the bottom row centered in that area as well: the
+	// touch hitboxes in MenuOptions::enterText() are still based on 640x480.
+	// Without this offset an 800x480 framebuffer shifts ABC/SPACE/DEL/OK
+	// 40 physical pixels to the left on the lower screen.
+	const int lowerKeyboardOffsetX = (_engine->width() - 640) / 2;
+	const Common::Rect caseRect(30 + lowerKeyboardOffsetX, 384, 136 + lowerKeyboardOffsetX, 440);
+	const Common::Rect spaceRect(142 + lowerKeyboardOffsetX, 384, 356 + lowerKeyboardOffsetX, 440);
+	const Common::Rect delRect(362 + lowerKeyboardOffsetX, 384, 476 + lowerKeyboardOffsetX, 440);
+	const Common::Rect okRect(482 + lowerKeyboardOffsetX, 384, 610 + lowerKeyboardOffsetX, 440);
 
 	drawClassicKey(caseRect, uppercase ? "abc" : "ABC",
 	               selectedY == 4 && selectedX == 0);
@@ -2663,11 +2717,16 @@ static void copyFrontBufferScaledToSurface(TwinEEngine *engine, Graphics::Manage
 	}
 	byte palette[256 * 3];
 	engine->_frontVideoBuffer.getPalette(palette, 0, 256);
-	const int srcW = engine->_frontVideoBuffer.w;
+	const int bufferW = engine->_frontVideoBuffer.w;
 	const int srcH = engine->_frontVideoBuffer.h;
+	// The lower LCD always presents the original 4:3 LBA menu artwork.
+	// Widescreen only widens gameplay: do not squash an 800px-wide canvas
+	// (including its side bars) into the native 320px touch display.
+	const int srcW = MIN(bufferW, srcH * 4 / 3);
+	const int cropX = (bufferW - srcW) / 2;
 	for (int y = 0; y < 240; ++y) {
 		const int sy = y * srcH / 240;
-		const byte *src = (const byte *)engine->_frontVideoBuffer.getBasePtr(0, sy);
+		const byte *src = (const byte *)engine->_frontVideoBuffer.getBasePtr(cropX, sy);
 		uint32 *out = (uint32 *)dst.getBasePtr(0, y);
 		for (int x = 0; x < 320; ++x) {
 			const byte idx = src[x * srcW / 320];
@@ -2685,15 +2744,17 @@ static void copyFrontBufferRectScaledToSurface(TwinEEngine *engine, Graphics::Ma
 	}
 	byte palette[256 * 3];
 	engine->_frontVideoBuffer.getPalette(palette, 0, 256);
-	const int srcW = engine->_frontVideoBuffer.w;
+	const int bufferW = engine->_frontVideoBuffer.w;
 	const int srcH = engine->_frontVideoBuffer.h;
-	const int dstLeft = CLIP<int>(srcRect.left * 320 / srcW, 0, 319);
-	const int dstRight = CLIP<int>((srcRect.right * 320 + srcW - 1) / srcW, 1, 320);
+	const int srcW = MIN(bufferW, srcH * 4 / 3);
+	const int cropX = (bufferW - srcW) / 2;
+	const int dstLeft = CLIP<int>((srcRect.left - cropX) * 320 / srcW, 0, 319);
+	const int dstRight = CLIP<int>(((srcRect.right - cropX) * 320 + srcW - 1) / srcW, 1, 320);
 	const int dstTop = CLIP<int>(srcRect.top * 240 / srcH, 0, 239);
 	const int dstBottom = CLIP<int>((srcRect.bottom * 240 + srcH - 1) / srcH, 1, 240);
 	for (int y = dstTop; y < dstBottom; ++y) {
 		const int sy = y * srcH / 240;
-		const byte *src = (const byte *)engine->_frontVideoBuffer.getBasePtr(0, sy);
+		const byte *src = (const byte *)engine->_frontVideoBuffer.getBasePtr(cropX, sy);
 		uint32 *out = (uint32 *)dst.getBasePtr(0, y);
 		for (int x = dstLeft; x < dstRight; ++x) {
 			const int sx = x * srcW / 320;

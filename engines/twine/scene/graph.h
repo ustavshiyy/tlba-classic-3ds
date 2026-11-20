@@ -53,6 +53,58 @@ inline bool drawGraph(int32 posX, int32 posY, const uint8 *pGraph, bool isSprite
 
 	pGraph += 4; // skip the header
 
+#ifdef __3DS__
+	// The original graph renderer obtains a pointer at (x, y) *before*
+	// clipping x. At the edges of an 800x480 viewport x can be negative or
+	// beyond the stride. Decode the RLE by runs and only form valid pointers.
+	// Keep the old fast renderer for the original 4:3 mode.
+	if (frontVideoBuffer.w * 3 > frontVideoBuffer.h * 4) {
+		const int32 safeLeft = MAX<int32>(0, clip.left);
+		const int32 safeRight = MIN<int32>(frontVideoBuffer.w, clip.right);
+		const int32 safeTop = MAX<int32>(0, clip.top);
+		const int32 safeBottom = MIN<int32>(frontVideoBuffer.h, clip.bottom);
+
+		for (int32 y = top; y < maxY; ++y) {
+			const int32 numRuns = *pGraph++;
+			int32 x = left;
+			const bool visibleRow = y >= safeTop && y < safeBottom;
+			for (int32 run = 0; run < numRuns; ++run) {
+				const uint8 spec = *pGraph++;
+				const int32 length = bits(spec, 0, 6) + 1;
+				const int32 op = bits(spec, 6, 2);
+				if (op == 0) {
+					x += length;
+					continue;
+				}
+
+				const int32 start = MAX<int32>(x, safeLeft);
+				const int32 stop = MIN<int32>(MIN<int32>(x + length, safeRight), right);
+				if (op == 1) { // a literal run consumes length input bytes
+					if (visibleRow && stop > start) {
+						uint8 *out = (uint8 *)frontVideoBuffer.getBasePtr(start, y);
+						memcpy(out, pGraph + (start - x), stop - start);
+					}
+					pGraph += length;
+				} else { // a repeated-colour run consumes one input byte
+					const uint8 colour = *pGraph++;
+					if (visibleRow && stop > start) {
+						uint8 *out = (uint8 *)frontVideoBuffer.getBasePtr(start, y);
+						memset(out, colour, stop - start);
+					}
+				}
+				x += length;
+			}
+		}
+		Common::Rect dirty(left, top, right, bottom);
+		dirty.clip(Common::Rect(0, 0, frontVideoBuffer.w, frontVideoBuffer.h));
+		dirty.clip(clip);
+		if (!dirty.isEmpty()) {
+			frontVideoBuffer.addDirtyRect(dirty);
+		}
+		return true;
+	}
+#endif
+
 	int32 x = left;
 
 	// if (left >= textWindowLeft-2 && top >= textWindowTop-2 && right <= textWindowRight-2 && bottom <= textWindowBottom-2) // crop
